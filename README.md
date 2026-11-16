@@ -4,6 +4,28 @@ Oma treeni-, yöaika- ja painopäiväkirja selaimessa ja puhelimen aloitusnäyt�
 
 **Sovellus:** https://olavihamalainen.github.io/kuntokayra/
 
+[![Tests](https://github.com/olavihamalainen/kuntokayra/actions/workflows/tests.yml/badge.svg)](https://github.com/olavihamalainen/kuntokayra/actions/workflows/tests.yml)
+
+## Jatkaminen toisella avustajalla
+
+Tässä varastossa ovat koko sovelluksen lähdekoodi, kehitysohjeet ja automaattiset testit. Anna seuraavalle avustajalle varaston osoite ja pyydä lukemaan ensin:
+
+- [AGENTS.md](AGENTS.md): tärkeimmät säännöt muutosten tekemiseen ja tietojen säilyttämiseen.
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): tallennusmuoto, aiemmat toteutuspäätökset, toimintavaatimukset ja julkaisujen ero.
+- [docs/TESTING.md](docs/TESTING.md): ajettavat testit, niiden rajaukset ja manuaalinen selaintestaus.
+
+GitHub Pages ja alkuperäinen [ChatGPT Sites -sovellus](https://kuntokayra-olavi-20261116.festivecoyote3.chatgpt.site) ovat erillisiä julkaisuja. Tähän varastoon tehty muutos ei päivitä alkuperäistä osoitetta eikä siirrä selaimen merkintöjä osoitteiden välillä.
+
+## Kehittäjän tarkistukset
+
+Testejä varten tarvitaan Node.js 22 tai uudempi; `.nvmrc` ja CI käyttävät Node.js 24:ää. Riippuvuuksia ei tarvitse asentaa:
+
+```sh
+npm test
+```
+
+Komento tarkistaa sovelluksen JavaScriptin syntaksin ja ajaa 35 regressiotestiä. Testit käyttävät simuloitua selainympäristöä ja synteettistä dataa. GitHub Actions ajaa saman komennon automaattisesti. Pelkät syntaksitarkistukset voi ajaa komennolla `npm run check`.
+
 ## Käyttö
 
 - Kirjaa treenejä kategorioihin Etukroppa ja Takakroppa. Seuraavaan treeniin ehdotetaan vastakkaista kategoriaa.
@@ -29,10 +51,10 @@ Varmuuskopiot ovat omia tietojasi. Säilytä ne omalla laitteellasi, älä täss
 
 ## Julkaisu ja päivittäminen
 
-Sovellus koostuu seitsemästä staattisesta tiedostosta. Se ei tarvitse npm-asennusta, build-komentoa tai erillistä palvelinta.
+Sovellus koostuu seitsemästä staattisesta tiedostosta. Se ei tarvitse npm-asennusta, build-komentoa tai erillistä palvelinta. Varaston `package.json` ja Node.js ovat vain kehitystarkistuksia varten.
 
 GitHub Pages julkaisee `main`-haaran juurikansion (`/`). Muutokset julkaistaan automaattisesti, kun ne tallennetaan `main`-haaraan. `.nojekyll` ohittaa Jekyll-käsittelyn.
 
 Kun muutat sovelluksen tiedostoja, kasvata `sw.js`-tiedoston `CACHE`-välimuistiversiota. Säilytä paikallisen tallennuksen avain, kilogrammoihin perustuva painojen tallennus ja aiempien JSON-varmuuskopioiden yhteensopivuus.
 
-Lähde vastaa Kuntokäyrän versiota `2841d89c3baddd1dcfcb50d632a279c4f79725d5`.
+Sovellustiedostojen lähtöversio on alkuperäisen Kuntokäyrä-projektin `2841d89c3baddd1dcfcb50d632a279c4f79725d5`. Nykyisen GitHub-version muutokset löytyvät tämän varaston Git-historiasta.

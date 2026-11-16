@@ -1,0 +1,12 @@
+{
+  "name": "kuntokayra",
+  "private": true,
+  "description": "Kuntokäyrän paikalliset tarkistukset ja regressiotestit",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "check": "node --check app.js && node --check sw.js",
+    "test": "npm run check && node --test tests/regression.test.mjs"
+  }
+}
