@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="fi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#173b34">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Kuntokäyrä">
+  <meta name="description" content="Oma treeni-, yöajan ja painon seuranta selkeinä käyrinä.">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./icon-192.png">
+  <link rel="icon" href="./icon-192.png" type="image/png">
+  <link rel="stylesheet" href="./styles.css">
+  <title>Kuntokäyrä</title>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Sovelluksen navigaatio">
+      <div class="brand"><span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span><span>Kuntokäyrä</span></div>
+      <div class="side-label">OMA SEURANTA</div>
+      <nav id="desktop-nav" class="side-nav"></nav>
+      <div class="sidebar-foot"><span class="privacy-dot"></span> Merkinnät tallentuvat tähän selaimeen</div>
+    </aside>
+    <div class="main-column">
+      <header class="topbar">
+        <div class="topbar-brand"><span class="brand-mark mini" aria-hidden="true"><span></span><span></span><span></span></span><strong>Kuntokäyrä</strong></div>
+        <span id="header-date" class="header-date"></span>
+        <button class="icon-button settings-button" type="button" data-tab="settings" aria-label="Asetukset" title="Asetukset">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.4 2.4-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.05 1.56V21h-3.4v-.49a1.7 1.7 0 0 0-1.05-1.56 1.7 1.7 0 0 0-1.88.34l-.06.06-2.4-2.4.06-.06A1.7 1.7 0 0 0 6.02 15a1.7 1.7 0 0 0-1.56-1.05H4v-3.4h.46A1.7 1.7 0 0 0 6.02 9.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.4-2.4.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 11.01 4V3h3.4v1a1.7 1.7 0 0 0 1.05 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.4 2.4-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.56 1.05H21v3.4h-.04A1.7 1.7 0 0 0 19.4 15Z"/></svg>
+        </button>
+      </header>
+      <main id="main" tabindex="-1"></main>
+    </div>
+  </div>
+  <nav id="mobile-nav" class="mobile-nav" aria-label="Päänavigaatio"></nav>
+  <div id="rest-timer-host"></div>
+  <dialog id="entry-dialog" aria-labelledby="dialog-title"><div id="dialog-content"></div></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <input id="import-file" type="file" accept="application/json,.json" hidden>
+  <script src="./app.js" defer></script>
+</body>
+</html>
