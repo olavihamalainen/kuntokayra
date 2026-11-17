@@ -24,7 +24,7 @@ Testejä varten tarvitaan Node.js 22 tai uudempi; `.nvmrc` ja CI käyttävät No
 npm test
 ```
 
-Komento tarkistaa sovelluksen JavaScriptin syntaksin ja ajaa 81 regressiotestiä. Testit käyttävät simuloitua selainympäristöä ja synteettistä dataa. GitHub Actions ajaa saman komennon automaattisesti. Pelkät syntaksitarkistukset voi ajaa komennolla `npm run check`.
+Komento tarkistaa sovelluksen ja Garmin-palvelun JavaScriptin syntaksin ja ajaa 142 regressiotestiä. Testit käyttävät simuloitua selainympäristöä ja synteettistä dataa. GitHub Actions ajaa saman komennon automaattisesti. Pelkät syntaksitarkistukset voi ajaa komennolla `npm run check`.
 
 ## Käyttö
 
@@ -35,6 +35,7 @@ Komento tarkistaa sovelluksen JavaScriptin syntaksin ja ajaa 81 regressiotestiä
 - Paina illalla **Menen nukkumaan** ja aamulla **Olen herännyt**. Kellonajat säilyvät sovelluksen sulkemisen yli. Tarkista ja tarvittaessa korjaa yö ennen tallennusta. Voit edelleen kirjata yöajan käsin.
 - Käyrät näyttävät koko valitun aikavälin ilman sivuttaisvieritystä. **30 pv** -näkymässä voit valita pisteen ja nähdä sen tiedot myös suurennetussa käyrässä. Yöajan katkoviiva ja yhteenveto näyttävät valitun aikavälin keskiarvon.
 - Kirjaa kehonpainoa sekä vie ja tuo JSON-varmuuskopioita asetuksissa.
+- **Garmin-aamupainot:** voit yhdistää oman Cloudflare Worker -palvelun asetuksissa. Kunkin päivän ensimmäinen punnitus klo 6.00–12.00 Helsingin ajassa tuodaan painokäyrään; aikaväliä voi muuttaa. Käsin kirjatut painot säilyvät. [Garminin käyttöönotto ja päivitys](garmin-worker/README.md).
 
 ## Tietojen tallennus ja siirtäminen
 
@@ -57,10 +58,12 @@ Uusimmat toimintamuutokset on koottu [17.11.2026 päivitysmuistioon](docs/RELEAS
 
 ## Julkaisu ja päivittäminen
 
-Sovellus koostuu seitsemästä staattisesta tiedostosta. Se ei tarvitse npm-asennusta, build-komentoa tai erillistä palvelinta. Varaston `package.json` ja Node.js ovat vain kehitystarkistuksia varten.
+Sovellus koostuu kahdeksasta staattisesta sovellustiedostosta. Se ei tarvitse npm-asennusta tai build-komentoa. Valinnainen Garmin-yhteys käyttää erikseen julkaistavaa Cloudflare Workeria. Varaston `package.json` ja Node.js ovat vain kehitystarkistuksia varten.
 
 GitHub Pages julkaisee `main`-haaran juurikansion (`/`). Muutokset julkaistaan automaattisesti, kun ne tallennetaan `main`-haaraan. `.nojekyll` ohittaa Jekyll-käsittelyn.
 
 Kun muutat sovelluksen tiedostoja, kasvata `sw.js`-tiedoston `CACHE`-välimuistiversiota. Säilytä paikallisen tallennuksen avain, kilogrammoihin perustuva painojen tallennus ja aiempien JSON-varmuuskopioiden yhteensopivuus.
 
 Sovellustiedostojen lähtöversio on alkuperäisen Kuntokäyrä-projektin `2841d89c3baddd1dcfcb50d632a279c4f79725d5`. Nykyisen GitHub-version muutokset löytyvät tämän varaston Git-historiasta.
+
+Garmin-päivitys siirrettiin käyttäjän toimivaksi vahvistamasta testiversiosta `a1ec97cea3355d2ab53ad7ba41974dfd90c5ee75`. Toteutus, tallennussopimus ja testausrajat: [docs/GARMIN.md](docs/GARMIN.md). Garminin API-avain kuuluu vain Cloudflaren Secret-asetukseen; yhteysavaimia tai omia punnituksia ei tallenneta tähän varastoon.

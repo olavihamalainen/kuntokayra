@@ -2,3 +2,6 @@
 *.log
 kuntokayra-varmuuskopio-*.json
 node_modules/
+.dev.vars*
+.env*
+.wrangler/

@@ -707,3 +707,6 @@ await import("./sleep-and-modal.test.mjs");
 await import("./mobile-rest-settings.test.mjs");
 
 await import("./charts.test.mjs");
+
+await import("./garmin-core.test.mjs");
+await import("./garmin-integration.test.mjs");

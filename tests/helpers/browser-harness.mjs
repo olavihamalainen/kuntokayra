@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 // Load the production app relative to this module, independent of cwd.
 const appPath = fileURLToPath(new URL("../../app.js", import.meta.url));
 const appSource = fs.readFileSync(appPath, "utf8");
+const garminCorePath = fileURLToPath(new URL("../../garmin-core.js", import.meta.url));
+const garminCoreSource = fs.existsSync(garminCorePath) ? fs.readFileSync(garminCorePath, "utf8") : null;
 assert.match(
   appSource,
   /\}\)\(\);\s*$/,
@@ -16,7 +18,7 @@ assert.match(
 // Only this in-memory test copy exposes state; app.js is never modified.
 const source = appSource.replace(
   /\}\)\(\);\s*$/,
-  `globalThis.__test = {getState:()=>state,getDraft:()=>workoutDraft,exerciseSeries,rawSeries,validateBackup,openWorkout,renderWorkoutEditor,chartAxis,sleepSummary,chart,getCharts:()=>charts};\n})();`,
+  `globalThis.__test = {getState:()=>state,getDraft:()=>workoutDraft,exerciseSeries,rawSeries,validateBackup,openWorkout,renderWorkoutEditor,chartAxis,sleepSummary,chart,getCharts:()=>charts,getGarminCore:()=>globalThis.KuntokayraGarmin,garminWindow:()=>garminWindow(),loadGarminConnection:()=>loadGarminConnection(),syncGarmin:(options)=>syncGarmin(options),disconnectGarmin:()=>disconnectGarmin()};\n})();`,
 );
 export const plain = (value) => JSON.parse(JSON.stringify(value));
 const decode = (value) =>
@@ -28,7 +30,7 @@ const decode = (value) =>
     .replace(/&amp;/g, "&");
 const key = "kuntokayra_v1";
 
-export function boot(initial, existingStorage) {
+export function boot(initial, existingStorage, options = {}) {
   const storage =
     existingStorage ||
     new Map([
@@ -45,10 +47,16 @@ export function boot(initial, existingStorage) {
     confirmations = [],
     eventRegistrations = [],
     focusCalls = [],
-    scrollCalls = [];
+    scrollCalls = [],
+    fetchCalls = [];
+  let fetchHandler = options.fetch || (() => { throw Error("Network disabled in test harness"); });
+  const fakeFetch = async (input, init = {}) => {
+    fetchCalls.push({ url: String(input), options: init });
+    return fetchHandler(input, init);
+  };
   // Deterministic clock shared by Date and timers. jumpClock intentionally models
   // elapsed background time without callbacks; tick then catches up pending work.
-  let clockNow = Date.parse("2026-11-16T12:00:00.000Z"),
+  let clockNow = options.now ?? Date.parse("2026-11-16T12:00:00.000Z"),
     timerSeq = 0;
   const clockOrigin = clockNow,
     timers = new Map();
@@ -436,10 +444,19 @@ export function boot(initial, existingStorage) {
       viewportListeners.set(type, items);
     },
   };
+  class BrowserURL extends URL {
+    static createObjectURL(blob) {
+      blobs.push(blob);
+      return `blob:test-${blobs.length}`;
+    }
+    static revokeObjectURL() {}
+  }
+  browserWindow.fetch = fakeFetch;
+  const navigator = { onLine: true };
   const context = vm.createContext({
     document,
     localStorage,
-    navigator: {},
+    navigator,
     window: browserWindow,
     Intl,
     Date: ClockDate,
@@ -469,13 +486,16 @@ export function boot(initial, existingStorage) {
     },
     crypto: webcrypto,
     performance: { now: () => clockNow - clockOrigin },
-    URL: {
-      createObjectURL(blob) {
-        blobs.push(blob);
-        return `blob:test-${blobs.length}`;
-      },
-      revokeObjectURL() {},
-    },
+    URL: BrowserURL,
+    URLSearchParams,
+    AbortController,
+    AbortSignal,
+    DOMException,
+    Headers,
+    Response,
+    fetch: fakeFetch,
+    btoa,
+    atob,
     setTimeout: (fn, delay, ...args) => schedule(fn, delay, false, args),
     clearTimeout: (handle) => timers.delete(handle),
     setInterval: (fn, delay, ...args) => schedule(fn, delay, true, args),
@@ -490,6 +510,7 @@ export function boot(initial, existingStorage) {
     alert: (message) => alerts.push(message),
     console,
   });
+  if (garminCoreSource) vm.runInContext(garminCoreSource, context, { filename: garminCorePath });
   vm.runInContext(source, context, { filename: appPath });
   const makeEvent = (type, target, fields = {}) => ({
     type,
@@ -550,6 +571,10 @@ export function boot(initial, existingStorage) {
     eventRegistrations,
     focusCalls,
     scrollCalls,
+    fetchCalls,
+    setFetch: handler => { fetchHandler = handler; },
+    setOnline: value => { navigator.onLine = Boolean(value); },
+    flush: async () => { for (let index = 0; index < 20; index++) await Promise.resolve(); },
     clock: {
       tick,
       jump: (milliseconds) => (clockNow += milliseconds),

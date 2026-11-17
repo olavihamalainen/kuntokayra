@@ -7,7 +7,7 @@ Kuntokäyrä on suomenkielinen, puhelimella käytettävä treeni-, yöaika- ja p
 - Sovelluksen varsinainen lähdekoodi on juuren `app.js`, `index.html` ja `styles.css`. `sw.js`, `manifest.webmanifest` ja kuvakkeet täydentävät PWA:n.
 - Sovellus on staattinen: ei palvelinta, tietokantaa, sovelluskehystä tai build-vaihetta. `package.json` koskee vain kehitystarkistuksia.
 - Testeihin tarvitaan Node.js 22 tai uudempi; `.nvmrc` ja CI käyttävät Node.js 24:ää. Riippuvuuksia ei tarvitse asentaa.
-- Aja `npm test`. Se sisältää JavaScriptin syntaksitarkistukset ja 81 regressiotestiä. Testit käyttävät vain synteettisiä tietoja.
+- Aja `npm test`. Se sisältää JavaScriptin syntaksitarkistukset ja 142 regressiotestiä. Testit käyttävät vain synteettisiä tietoja.
 - Säilytä suomenkieliset tekstit, puhelimeen sopiva asettelu, saavutettavat kenttänimet ja nykyinen vihreä ilme.
 
 ## Tallennussopimus
@@ -47,3 +47,16 @@ Kuntokäyrä on suomenkielinen, puhelimella käytettävä treeni-, yöaika- ja p
 - Jos muutat selaimelle toimitettavia sovellustiedostoja, kasvata `sw.js`:n `CACHE`-versiota. Pelkät dokumentti-, testi- tai CI-muutokset eivät tarvitse välimuistiversion muutosta.
 - Alkuperäinen ChatGPT Sites -julkaisu on erillinen kopio. GitHub-push ei päivitä sitä. Älä oleta julkaisujen tai niiden käyttäjätietojen synkronoituvan.
 - Säilytä käyttäjän pyytämä julkaisukohde. Älä vaihda osoitetta tai tallennustapaa jatkokehityksen sivuvaikutuksena.
+
+## Garmin-yhteys
+
+- Lue [docs/GARMIN.md](docs/GARMIN.md) ja [garmin-worker/README.md](garmin-worker/README.md). Yhteys on valinnainen. Ilman määritettyä yhteyttä käynnistys ei tee verkkopyyntöjä tai tallennuskirjoituksia.
+- `garmin-core.js` ladataan ennen `app.js`:ää ja kuuluu service workerin kuoreen. Se tekee Helsingin aikavyöhykkeen aamurajauksen ja tietoja suojaavan yhdistämisen.
+- Garminin henkilökohtainen API-avain kuuluu vain Workerin `GARMIN_API_KEY`-salaisuuteen. Selaimen `APP_ACCESS_TOKEN` ja Worker-osoite tallentuvat erilliseen `kuntokayra_garmin_connection_v1`-avaimeen, eivät päiväkirjaan tai varmuuskopioon. Uusi osoite tarvitsee yhteyden määrityksen erikseen.
+- Worker hyväksyy oletuksena täsmälleen `https://olavihamalainen.github.io`- ja nykyisen Sites-testiversion alkuperät. CORS-alkuperä ei sisällä `/kuntokayra/`-polkua. Valinnainen `ALLOWED_ORIGIN` korvaa oletukset yhdellä tarkasti validoidulla alkuperällä. Säilytä kummankin oletusosoitteen testit ja varsinaisten tietopyyntöjen tunnistautuminen.
+- Garminin `weight/range`-painot ovat grammoina profiilin näyttöyksiköstä riippumatta. Muunna vain Workerissa jakamalla tuhannella. Worker → selain -sopimus ja kaikki tallennetut painot ovat kilogrammoina. Säilytä koko ketjun testi, joka käyttää kirjaimellisia grammapainoja ja millisekuntiaikaleimoja.
+- Aamun valinta käyttää Europe/Helsinki-aikaa, oletuksena `06:00 <= aika < 12:00`, ja aikavälin ensimmäistä mittausta päivässä. `settings.garmin: {start,end}` on valinnainen ja säilyy taukoasetusta muutettaessa sekä version 1 varmuuskopioissa. Muuttunut aikaikkuna ei poista vanhoja painoja.
+- Suojaa käsin kirjatut ja vanhat ilman Garmin-alkuperätietoa olevat painot. Garmin-painon käsin muokkaus poistaa sen automaattisen päivitettävyyden. Yhteyden poisto säilyttää tuodut painot.
+- Tuonti, tyhjennys, painon poisto, aikaikkunan muutos ja yhteyden vaihto/poisto peruvat keskeneräisen haun. Myöhäistä vastausta ei saa yhdistää uuteen päiväkirjatilaan. Verkko-, vastaus- ja tallennusvirheet eivät korvaa merkintöjä.
+- Virhetarkenteet ovat kiinteitä käsittelykohtien tunnisteita, eivät koskaan Garminin vastausarvoja. Älä palauta tai kirjaa avaimia tai yksityisiä Garmin-vastauksia.
+- GitHub-päivitys ei julkaise käyttäjän omalla Cloudflare-tilillä olevaa Workeria. Älä raportoi Cloudflare-julkaisua tai oikeaa Garmin-hakua tarkistetuksi, ellei sitä ole todennettu.

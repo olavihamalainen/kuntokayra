@@ -1,6 +1,8 @@
 (() => {
   'use strict';
   const STORAGE_KEY = 'kuntokayra_v1';
+  const GARMIN_CONNECTION_KEY = 'kuntokayra_garmin_connection_v1';
+  const Garmin = globalThis.KuntokayraGarmin;
   const PERIODS = [['30', '30 pv'], ['90', '3 kk'], ['180', '6 kk'], ['365', '12 kk'], ['all', 'Kaikki']];
   const CATEGORIES = ['Etukroppa', 'Takakroppa'];
   const UNGROUPED_EXERCISES = ['Forkut'];
@@ -27,6 +29,10 @@
   const dialog = document.getElementById('entry-dialog');
   const dialogContent = document.getElementById('dialog-content');
   let state = loadState();
+  let garminConnection = loadGarminConnection();
+  let garminPending = null;
+  let garminSyncEpoch = 0;
+  let garminMessage = '';
   let tab = 'home';
   let period = '90';
   let progressMetric = 'weight';
@@ -90,6 +96,172 @@
   function persist(nextState = state) {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState)); return true; }
     catch (_) { toast('Tallennus ei onnistunut. Tarkista selaimen tallennustila.'); return false; }
+  }
+  function garminWindow() {
+    const value=state.settings?.garmin;
+    return Garmin?.validWindow(value)?{start:value.start,end:value.end}:{start:'06:00',end:'12:00'};
+  }
+  function garminWindowKey() { const value=garminWindow();return `${value.start}|${value.end}`; }
+  function validGarminEndpoint(value) {
+    try {
+      const url=new URL(value);
+      return url.protocol==='https:' && url.hostname.endsWith('.workers.dev') && !url.username && !url.password && !url.port && url.pathname==='/' && !url.search && !url.hash;
+    } catch (_) { return false; }
+  }
+  function validConnectionToken(value) { return typeof value==='string' && /^[A-Za-z0-9_-]{32,256}$/.test(value); }
+  function loadGarminConnection() {
+    try {
+      const value=JSON.parse(localStorage.getItem(GARMIN_CONNECTION_KEY));
+      if(value && validGarminEndpoint(value.endpoint) && validConnectionToken(value.accessToken)) {
+        return {endpoint:new URL(value.endpoint).origin,accessToken:value.accessToken,autoSync:value.autoSync!==false,...(validTimestamp(value.lastSuccessAt)?{lastSuccessAt:value.lastSuccessAt}:{}),...(typeof value.lastWindow==='string'?{lastWindow:value.lastWindow}:{})};
+      }
+    } catch (_) { /* An unconfigured integration never changes existing records. */ }
+    return null;
+  }
+  function writeGarminConnection(value) {
+    try {localStorage.setItem(GARMIN_CONNECTION_KEY,JSON.stringify(value));return true;}
+    catch (_) {setGarminMessage('Yhteysasetuksen tallennus epäonnistui. Aiempi yhteys säilyy.');return false;}
+  }
+  function setGarminMessage(message) {
+    garminMessage=message;
+    for(const node of document.querySelectorAll('[data-garmin-status]'))node.textContent=garminStatus();
+    for(const button of document.querySelectorAll('[data-action="garmin-sync"]'))button.disabled=!!garminPending || !garminConnection;
+  }
+  function garminStatus() {
+    if(garminMessage)return garminMessage;
+    if(!garminConnection)return 'Garmin-yhteyttä ei ole vielä otettu käyttöön.';
+    if(garminConnection.lastSuccessAt)return `Viimeisin haku: ${new Date(garminConnection.lastSuccessAt).toLocaleString('fi-FI',{timeZone:'Europe/Helsinki'})}.`;
+    return 'Yhteys on tallennettu. Hae aamupainot ensimmäisen kerran.';
+  }
+  function cancelGarminSync() {
+    const pending=!!garminPending;
+    garminSyncEpoch++;
+    garminPending?.abort();garminPending=null;
+    if(pending)setGarminMessage('Garmin-haku peruttiin.');
+  }
+  function generateGarminToken() {
+    const field=document.getElementById('garmin-access-token');if(!field)return;
+    if(!globalThis.crypto?.getRandomValues){setGarminMessage('Yhteysavaimen luominen ei onnistu tässä selaimessa.');return;}
+    const bytes=new Uint8Array(32);crypto.getRandomValues(bytes);
+    field.value=Array.from(bytes,value=>value.toString(16).padStart(2,'0')).join('');field.type='text';
+    setGarminMessage('Kopioi uusi yhteysavain Cloudflaren APP_ACCESS_TOKEN-salaisuudeksi. Tallenna yhteys vasta, kun sama avain on Cloudflaressa.');
+  }
+  function saveGarminWindow(form) {
+    const data=new FormData(form),value={start:String(data.get('start')||''),end:String(data.get('end')||'')};
+    const error=document.getElementById('garmin-window-error');
+    if(!Garmin?.validWindow(value)){error.textContent='Valitse saman päivän aikaväli, jossa alkuaika on ennen loppuaikaa.';return;}
+    const nextState={...state,settings:{...state.settings,restSeconds:restSeconds(),garmin:value}};
+    if(!persist(nextState)){error.textContent='Aikaväliä ei tallennettu. Aiempi valinta säilyy.';return;}
+    cancelGarminSync();state=nextState;error.textContent='';
+    setGarminMessage(`Aamupainon aikaväli ${value.start}–${value.end} tallennettu. Se on käytössä seuraavassa tuonnissa.`);
+    toast('Aamupainon aikaväli tallennettu');
+  }
+  async function saveGarminConnection(form) {
+    const data=new FormData(form),endpoint=String(data.get('endpoint')||'').trim(),accessToken=String(data.get('accessToken')||'').trim();
+    const error=document.getElementById('garmin-connection-error');
+    if(!validGarminEndpoint(endpoint)){error.textContent='Anna Cloudflare-palvelusi https-osoite, joka päättyy workers.dev. Älä lisää polkua tai kyselyparametreja.';return;}
+    if(!validConnectionToken(accessToken)){error.textContent='Luo yhteysavain tästä ja tallenna se Cloudflareen APP_ACCESS_TOKEN-nimellä. Avaimen pitää olla 32–256 merkkiä.';return;}
+    const value={endpoint:new URL(endpoint).origin,accessToken,autoSync:true};
+    if(!writeGarminConnection(value)){error.textContent='Yhteyttä ei tallennettu. Tarkista selaimen tallennustila.';return;}
+    cancelGarminSync();garminConnection=value;error.textContent='';
+    await syncGarmin();
+    if(tab==='settings')render();
+  }
+  function disconnectGarmin() {
+    try {localStorage.removeItem(GARMIN_CONNECTION_KEY);}
+    catch (_) {setGarminMessage('Yhteyden poistaminen epäonnistui. Yritä uudelleen.');return;}
+    cancelGarminSync();garminConnection=null;
+    setGarminMessage('Garmin-yhteys poistettu tästä selaimesta. Aiemmin tuodut painot säilyvät.');
+    if(tab==='settings')render();
+  }
+  function skipAutomaticGarmin(now,windowKey) {
+    if(!garminConnection.autoSync)return true;
+    const last=Date.parse(garminConnection.lastSuccessAt);
+    if(!Number.isFinite(last) || garminConnection.lastWindow!==windowKey || Garmin.getDate(last)!==Garmin.getDate(now))return false;
+    // An early empty fetch must not hide a weighing made later that morning.
+    const todayDate=Garmin.getDate(now),end=garminWindow().end;
+    const parts=Object.fromEntries(new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Helsinki',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date(last)).map(part=>[part.type,part.value]));
+    const lastMinute=Number(parts.hour)*60+Number(parts.minute),endMinute=Number(end.slice(0,2))*60+Number(end.slice(3));
+    return now-last<15*60000 || state.weight.some(row=>row.date===todayDate) || lastMinute>=endMinute;
+  }
+  function garminFailureMessage(error) {
+    const messages={
+      UNAUTHORIZED:'Yhteysavain ei kelpaa. Tarkista, että sovelluksessa ja Cloudflaren APP_ACCESS_TOKEN-asetuksessa on sama avain.',
+      NOT_CONFIGURED:'Cloudflaren asetukset ovat kesken. Tarkista GARMIN_API_KEY ja APP_ACCESS_TOKEN.',
+      INVALID_RANGE:'Palvelu ei hyväksynyt haettavaa päivämääräväliä. Tarkista laitteen päivämäärä.',
+      GARMIN_KEY_REJECTED:'Garmin ei hyväksynyt henkilökohtaista API-avainta. Tarkista Cloudflaren GARMIN_API_KEY-asetuksen arvo ja avaimen voimassaolo.',
+      GARMIN_TOKEN_REJECTED:'Garmin ei hyväksynyt palvelun käyttötunnistetta. Hae uudelleen ja tarkista Garmin-avaimen tila, jos virhe jatkuu.',
+      GARMIN_ACCESS_DENIED:'Garmin esti pääsyn painotietoihin. Garmin-palvelun käyttöoikeus on tarkistettava.',
+      GARMIN_RATE_LIMITED:'Garmin rajoitti hakujen määrää. Odota hetki ennen seuraavaa hakua.',
+      GARMIN_TIMEOUT:'Garmin ei vastannut ajoissa. Yritä myöhemmin uudelleen.',
+      GARMIN_RESPONSE_INVALID:'Garminin vastauksen muoto ei vastannut odotettua. Vastauksen lukeminen on tarkistettava; avainta ei tarvitse tämän virheen vuoksi luoda uudelleen.',
+      GARMIN_UNAVAILABLE:'Garmin-yhteys ei ole juuri nyt käytettävissä. Tarkempi palvelinyhteyden tarkistus voi olla tarpeen.',
+      ORIGIN_DENIED:'Cloudflare-palvelu ei hyväksynyt tämän sovelluksen osoitetta. Tarkista palvelun ALLOWED_ORIGIN-asetus.',
+      NOT_FOUND:'Cloudflare-palvelusta ei löytynyt Garmin-hakua. Tarkista Worker-osoite ja julkaistu koodi.',
+      METHOD_NOT_ALLOWED:'Cloudflare-palvelu ei hyväksynyt hakupyyntöä. Tarkista julkaistu Worker-koodi.'
+    };
+    const details={
+      TOKEN_FORMAT:'Garminin käyttötunnisteen muoto',TOKEN_EXPIRATION:'Garminin käyttötunnisteen voimassaoloaika',
+      WEIGHT_JSON:'painovastauksen JSON-muoto',WEIGHT_SUMMARIES:'päiväkohtaisten yhteenvetojen rakenne',
+      WEIGHT_ENTRIES:'yksittäisten punnitusten luettelo',WEIGHT_VALUE:'punnituksen painoarvo',
+      TIMESTAMP_FORMAT:'punnituksen aikaleima',WEIGHT_CONFLICT:'saman mittaushetken ristiriitaiset painot',
+      MEASUREMENT_LIMIT:'punnitusten enimmäismäärä',BODY_LIMIT:'vastauksen enimmäiskoko',
+      EMPTY_RESPONSE:'tyhjä vastaus',RESPONSE_FORMAT:'vastauksen tekstimuoto'
+    };
+    if(error.garminCode==='GARMIN_RESPONSE_INVALID' && Object.hasOwn(details,error.garminDetail))return `${messages.GARMIN_RESPONSE_INVALID} Tarkistettava kohta: ${details[error.garminDetail]}. (${error.garminCode}/${error.garminDetail})`;
+    if(Object.hasOwn(messages,error.garminCode))return `${messages[error.garminCode]} (${error.garminCode})`;
+    if(error.status===401)return messages.UNAUTHORIZED;
+    if(error.status===503)return messages.NOT_CONFIGURED;
+    if(error.status===502)return 'Garmin-haussa tapahtui virhe (HTTP 502). Palvelu ei antanut tunnettua virhetunnistetta.';
+    if(error.name==='AbortError')return 'Garmin-haku aikakatkaistiin. Yritä uudelleen.';
+    if(error.name==='TypeError')return 'Cloudflare-palveluun ei saatu yhteyttä. Tarkista Worker-osoite ja verkkoyhteys.';
+    return 'Garmin-haku epäonnistui tai vastauksessa oli virhe. Aiemmat merkinnät säilyvät.';
+  }
+  async function syncGarmin({automatic=false}={}) {
+    if(!Garmin || !garminConnection || garminPending)return;
+    if(navigator.onLine===false){if(!automatic)setGarminMessage('Garmin-haku tarvitsee verkkoyhteyden.');return;}
+    const now=Date.now(),windowKey=garminWindowKey();
+    if(automatic && skipAutomaticGarmin(now,windowKey))return;
+    const connection=garminConnection,windowValue=garminWindow(),range=Garmin.dateRange30(now),epoch=++garminSyncEpoch,controller=new AbortController();
+    garminPending=controller;
+    setGarminMessage('Haetaan Garminin aamupainoja…');
+    const timeout=setTimeout(()=>controller.abort(),20000);
+    const current=()=>epoch===garminSyncEpoch && connection===garminConnection && windowKey===garminWindowKey();
+    try {
+      const url=new URL('/v1/weights',connection.endpoint);url.searchParams.set('from',range.from);url.searchParams.set('to',range.to);
+      const response=await fetch(url.href,{method:'GET',headers:{Authorization:`Bearer ${connection.accessToken}`,Accept:'application/json'},cache:'no-store',credentials:'omit',redirect:'error',signal:controller.signal});
+      if(!current())return;
+      if(!response.ok){
+        const error=new Error('Garmin-palvelu ei vastannut.');error.status=response.status;
+        // Only predefined codes/stages are displayed, never upstream text or credentials.
+        try{const payload=await response.json();if(typeof payload?.error==='string')error.garminCode=payload.error;if(typeof payload?.detail==='string')error.garminDetail=payload.detail;}catch (_){}
+        throw error;
+      }
+      const payload=await response.json();if(!current())return;
+      const receivedAt=Date.now(),measurements=Garmin.normalizeMeasurements(payload?.measurements,receivedAt);
+      if(measurements.some(row=>{const date=Garmin.getDate(row.timestamp);return date<range.from || date>range.to;}))throw new Error('Virheellinen mittausjakso');
+      const selected=Garmin.selectMorning(measurements,windowValue,receivedAt),result=Garmin.mergeWeights(state.weight,selected,windowValue);
+      if(!current())return;
+      if(result.added || result.updated){const nextState={...state,weight:result.rows};if(!persist(nextState)){setGarminMessage('Mittauksia ei tallennettu. Aiemmat painot säilyvät.');return;}state=nextState;}
+      const nextConnection={...connection,lastSuccessAt:new Date(receivedAt).toISOString(),lastWindow:windowKey};
+      const markerSaved=writeGarminConnection(nextConnection);if(markerSaved)garminConnection=nextConnection;
+      garminMessage=`Haku valmis: ${result.added} uutta ja ${result.updated} päivitettyä aamupainoa.${result.skipped?' Käsin kirjattu tai jo tuotu paino säilytettiin.':''}${selected.length?'':' Aikavälille ei löytynyt aamupunnituksia.'}${markerSaved?'':' Hakuaikaa ei voitu tallentaa.'}`;
+      if(!dialog.open && ['home','weight','progress'].includes(tab))render();
+    } catch(error) {
+      if(!current())return;
+      setGarminMessage(garminFailureMessage(error));
+    } finally {
+      clearTimeout(timeout);
+      if(epoch===garminSyncEpoch){garminPending=null;setGarminMessage(garminMessage);}
+    }
+  }
+  function garminSettings() {
+    const value=garminWindow(),connection=garminConnection;
+    return `<section class="panel garmin-panel"><h2>Garmin-aamupainot</h2><p>Tuodaan viimeisten 30 päivän ensimmäinen aamupunnitus päivää kohti. Kellonajat ovat Suomen ajassa, myös kesäaikana. Käsin kirjatut painot säilyvät.</p>
+    <form id="garmin-window-form"><div class="field-row"><div class="field"><label for="garmin-start">Alkaen</label><input id="garmin-start" name="start" type="time" value="${value.start}" required></div><div class="field"><label for="garmin-end">Ennen kelloa</label><input id="garmin-end" name="end" type="time" value="${value.end}" required></div></div><p class="form-note">Alkuaika kuuluu aikaväliin, loppuaika ei. Muutos koskee seuraavia tuonteja. Aiemmin tuotuja painoja ei poisteta automaattisesti.</p><div id="garmin-window-error" class="form-error" role="alert"></div><button type="submit" class="button secondary">Tallenna aamun aikaväli</button></form>
+    <details class="garmin-setup"><summary>Cloudflare-yhteyden käyttöönotto</summary><ol><li><a href="./garmin-worker/worker.mjs" target="_blank" rel="noopener">Avaa taustapalvelun valmis koodi</a>. Luo omalle Cloudflare-tilillesi Worker-palvelu tai avaa nykyinen Worker. Korvaa sen koodi tällä koodilla ja valitse <strong>Deploy</strong>. Tarkemmat ohjeet ovat <a href="https://github.com/olavihamalainen/kuntokayra/blob/main/garmin-worker/README.md" target="_blank" rel="noopener">asennusohjeessa</a>.</li><li>Luo henkilökohtainen API-avain Garmin Connectin verkkosivujen asetuksissa. Lisää se vain Cloudflaren Worker-asetuksiin salaisuutena nimeltä <code>GARMIN_API_KEY</code>.</li><li>Paina alla <strong>Luo yhteysavain</strong>. Kopioi se Cloudflareen toiseksi salaisuudeksi nimeltä <code>APP_ACCESS_TOKEN</code>. Tämä on eri avain kuin Garmin-avain.</li><li>Liitä Workerin <code>https://…workers.dev</code>-osoite alle ja paina <strong>Tallenna yhteys ja hae</strong>.</li></ol><p>Jos käytit yhteyttä jo testisovelluksessa, säilytä nykyiset avaimet ja päivitä vain Worker-koodi sallimaan myös GitHub-sovelluksen osoite. Tallenna sama Worker-osoite ja yhteysavain tähän sovellukseen erikseen.</p><p>Garminin henkilökohtaista API-avainta ei syötetä Kuntokäyrään tai tähän keskusteluun.</p></details>
+    <form id="garmin-connection-form"><div class="field garmin-endpoint"><label for="garmin-endpoint">Cloudflare-palvelun osoite</label><input id="garmin-endpoint" name="endpoint" type="url" inputmode="url" value="${esc(connection?.endpoint||'')}" placeholder="https://kuntokayra-garmin.oma-tili.workers.dev" autocomplete="off" autocapitalize="none" spellcheck="false" required></div><div class="field"><label for="garmin-access-token">Yhteysavain (APP_ACCESS_TOKEN)</label><input id="garmin-access-token" name="accessToken" type="password" value="${esc(connection?.accessToken||'')}" minlength="32" maxlength="256" autocomplete="off" autocapitalize="none" spellcheck="false" required></div><button class="text-action" type="button" data-action="garmin-new-token">Luo yhteysavain</button><p class="form-note">Yhteys muistetaan tässä selaimessa. Yhteysavain ei kuulu varmuuskopioihin. Uudet aamupainot haetaan automaattisesti sovelluksen avautuessa tai siihen palatessa. Kun päivän paino on löytynyt, samana päivänä ei tehdä turhia automaattisia hakuja.</p><div id="garmin-connection-error" class="form-error" role="alert"></div><div class="settings-actions"><button class="button secondary" type="submit">Tallenna yhteys ja hae</button>${connection?'<button class="button ghost" type="button" data-action="garmin-disconnect">Poista yhteys</button>':''}</div></form>
+    <p id="garmin-status" class="garmin-status" data-garmin-status role="status">${esc(garminStatus())}</p><button class="button ghost" type="button" data-action="garmin-sync" ${!connection||garminPending?'disabled':''}>Päivitä Garminista</button></section>`;
   }
   function toast(message) {
     const el = document.getElementById('toast');
@@ -480,8 +652,9 @@
   function renderWeight() {
     const points=rawSeries('weight'), data=inPeriod(points), last=latest(state.weight);
     return `${header('Kehonpaino','OMA MITTAUS','Seuraa muutosta ajan mittaan ilman valmiita tavoitteita tai arvioita.',addButton('new-weight','Kirjaa paino'))}
+    <section class="garmin-weight-strip"><div><strong>Garmin-aamupainot</strong><p data-garmin-status role="status">${esc(garminStatus())}</p></div>${garminConnection?`<button class="button secondary" type="button" data-action="garmin-sync" ${garminPending?'disabled':''}>Päivitä Garminista</button>`:'<button class="button secondary" type="button" data-tab="settings">Ota Garmin käyttöön</button>'}</section>
     ${trendPanel(points,'weight','Painon kehitys','Kilogrammaa','#c3795e',data,last)}
-    <div class="section-heading"><h2>Painomerkinnät</h2></div>${state.weight.length?`<div class="entry-list">${sorted(state.weight).map(row=>`<article class="entry-card"><div class="entry-main"><h3 class="entry-title">${esc(fullDate(row.date))}</h3><div class="entry-meta">Päivän mittaus</div><div class="entry-summary"><strong>${esc(weightText(row.value))}</strong></div></div>${entryActions('weight',row)}</article>`).join('')}</div>`:empty('weight','Ei vielä painomerkintöjä','Kirjaa mittaus, niin näet ajan myötä oman painokäyräsi.','new-weight','Kirjaa paino')}`;
+    <div class="section-heading"><h2>Painomerkinnät</h2></div>${state.weight.length?`<div class="entry-list">${sorted(state.weight).map(row=>`<article class="entry-card"><div class="entry-main"><h3 class="entry-title">${esc(fullDate(row.date))}</h3><div class="entry-meta">${Garmin?.isGarminRow(row)?`Garmin · aamupaino klo ${esc(new Date(row.measuredAt).toLocaleTimeString('fi-FI',{timeZone:'Europe/Helsinki',hour:'2-digit',minute:'2-digit'}))}`:'Päivän mittaus'}</div><div class="entry-summary"><strong>${esc(weightText(row.value))}</strong></div></div>${entryActions('weight',row)}</article>`).join('')}</div>`:empty('weight','Ei vielä painomerkintöjä','Kirjaa mittaus, niin näet ajan myötä oman painokäyräsi.','new-weight','Kirjaa paino')}`;
   }
   function changeText(data, metric, unit = 'kg') {
     if (metric==='sleep') return data.length?signedSleepDifference(sleepSummary(data).latestDifference):'—';
@@ -524,10 +697,11 @@
   }
   function renderSettings() {
     return `${header('Asetukset','OMAT TIEDOT','Pidä kirjausdata omassa hallinnassasi.')}
-    <div class="settings-stack"><section class="panel"><h2>Lisää puhelimen aloitusnäyttöön</h2><p>Avaa tämä sivu puhelimellasi. Asennettuna se näyttää ja toimii sovelluksen tavoin.</p><ol class="install-steps"><li>iPhone: avaa Safari, napauta Jaa-painiketta ja valitse <strong>Lisää Koti-valikkoon</strong>.</li><li>Android: avaa Chrome-valikko ja valitse <strong>Asenna sovellus</strong> tai <strong>Lisää aloitusnäyttöön</strong>.</li></ol>${deferredInstall?'<div class="settings-actions" style="margin-top:17px"><button type="button" class="button primary" data-action="install">Asenna sovellus</button></div>':''}</section>
+    <div class="settings-stack">${document.body.dataset.preview==='true'?'<section class="panel preview-note"><h2>Oma esikatselu</h2><p>Tämä on testiversio. Sen merkinnät tallentuvat tähän osoitteeseen erillään tavallisesta Kuntokäyrästä. Voit tuoda kokeiluun oman varmuuskopiosi.</p></section>':''}<section class="panel"><h2>Lisää puhelimen aloitusnäyttöön</h2><p>Avaa tämä sivu puhelimellasi. Asennettuna se näyttää ja toimii sovelluksen tavoin.</p><ol class="install-steps"><li>iPhone: avaa Safari, napauta Jaa-painiketta ja valitse <strong>Lisää Koti-valikkoon</strong>.</li><li>Android: avaa Chrome-valikko ja valitse <strong>Asenna sovellus</strong> tai <strong>Lisää aloitusnäyttöön</strong>.</li></ol>${deferredInstall?'<div class="settings-actions" style="margin-top:17px"><button type="button" class="button primary" data-action="install">Asenna sovellus</button></div>':''}</section>
+    ${garminSettings()}
     <section class="panel"><h2>Sarjataukon pituus</h2><p>Valitse 15 sekuntia–30 minuuttia. Uusi pituus koskee seuraavaa taukoa ja Uudelleen-painiketta. Käynnissä oleva tauko jatkuu nykyiseen loppuhetkeensä.</p><form id="rest-settings-form"><div class="field-row"><div class="field"><label for="rest-minutes">Minuutit</label><input id="rest-minutes" name="minutes" type="number" inputmode="numeric" min="0" max="30" step="1" value="${Math.floor(restSeconds()/60)}" required></div><div class="field"><label for="rest-seconds">Sekunnit</label><input id="rest-seconds" name="seconds" type="number" inputmode="numeric" min="0" max="59" step="1" value="${restSeconds()%60}" required></div></div><div id="rest-settings-error" class="form-error" role="alert"></div><button class="button secondary" type="submit">Tallenna taukoaika</button></form></section>
     <section class="panel"><h2>Varmuuskopio</h2><p>Merkinnät tallentuvat tämän laitteen selaimeen. Ne eivät synkronoidu automaattisesti toiseen puhelimeen tai tietokoneeseen. Vie JSON-varmuuskopio talteen ja tuo se tarvittaessa takaisin.</p><div class="settings-actions"><button type="button" class="button secondary" data-action="export">${svg('download')} Vie tiedot</button><button type="button" class="button ghost" data-action="import">${svg('upload')} Tuo varmuuskopio</button></div></section>
-    <section class="panel"><h2>Poista kaikki merkinnät</h2><p>Tämä poistaa tämän selaimen treenit, yömerkinnät ja painot. Vie varmuuskopio ensin, jos haluat säilyttää ne.</p><button type="button" class="button danger" data-action="clear">Poista tiedot</button></section></div>`;
+    <section class="panel"><h2>Poista kaikki merkinnät</h2><p>Tämä poistaa tämän selaimen treenit, yömerkinnät ja painot. Vie varmuuskopio ensin, jos haluat säilyttää ne. Garmin-yhteys säilyy ja voi tuoda painoja uudelleen. Voit poistaa yhteyden erikseen Garmin-asetuksista.</p><button type="button" class="button danger" data-action="clear">Poista tiedot</button></section></div>`;
   }
   function render() {
     // Registry entries only describe the current DOM; chart selection never persists data.
@@ -721,7 +895,15 @@
       output.workouts.push(entry);
     }
     for (const row of data.sleep) {if(!validDate(row.date)||!validTime(row.bed)||!validTime(row.wake)||nightDuration(row.bed,row.wake)>16) throw Error('Yömerkinnöissä on virhe.');output.sleep.push({id:id(),date:row.date,bed:row.bed,wake:row.wake,duration:nightDuration(row.bed,row.wake)});}
-    for (const row of data.weight) {const value=Number(row.value);if(!validDate(row.date)||!Number.isFinite(value)||value<1||value>1000) throw Error('Painomerkinnöissä on virhe.');output.weight.push({id:id(),date:row.date,value});}
+    for (const row of data.weight) {
+      const value=Number(row.value);if(!validDate(row.date)||!Number.isFinite(value)||value<1||value>1000)throw Error('Painomerkinnöissä on virhe.');
+      const entry={id:id(),date:row.date,value};
+      if(row.source!==undefined || row.garminId!==undefined || row.measuredAt!==undefined) {
+        if(!Garmin?.isGarminRow({...row,value}))throw Error('Painomerkinnän Garmin-tiedoissa on virhe.');
+        Object.assign(entry,{source:'garmin',garminId:row.garminId,measuredAt:row.measuredAt});
+      }
+      output.weight.push(entry);
+    }
     if (data.sleepPending!==undefined) {
       const pending=data.sleepPending;
       if (!pending || typeof pending.id!=='string' || !pending.id.trim() || pending.id.length>100 || !validTimestamp(pending.startedAt) || (pending.endedAt!==undefined && (!validTimestamp(pending.endedAt) || Date.parse(pending.endedAt)<Date.parse(pending.startedAt)))) throw Error('Aloitetun yön tiedoissa on virhe.');
@@ -729,8 +911,12 @@
       if (pending.endedAt!==undefined) output.sleepPending.endedAt=pending.endedAt;
     }
     if (data.settings!==undefined) {
-      if (!data.settings || typeof data.settings!=='object' || Array.isArray(data.settings) || !validRestSeconds(data.settings.restSeconds)) throw Error('Sarjataukon asetuksessa on virhe.');
-      output.settings={restSeconds:data.settings.restSeconds};
+      if(!data.settings || typeof data.settings!=='object' || Array.isArray(data.settings))throw Error('Asetuksissa on virhe.');
+      const settings={};
+      if(data.settings.restSeconds!==undefined){if(!validRestSeconds(data.settings.restSeconds))throw Error('Sarjataukon asetuksessa on virhe.');settings.restSeconds=data.settings.restSeconds;}
+      if(data.settings.garmin!==undefined){if(!Garmin?.validWindow(data.settings.garmin))throw Error('Garminin aikaväliasetuksessa on virhe.');settings.garmin={start:data.settings.garmin.start,end:data.settings.garmin.end};}
+      if(!Object.keys(settings).length)throw Error('Asetuksissa on virhe.');
+      output.settings=settings;
     }
     return output;
   }
@@ -776,6 +962,9 @@
     if(button.dataset.exerciseMetric) {exerciseMetric=button.dataset.exerciseMetric;render();return;}
     const action=button.dataset.action, rowId=button.dataset.id;
     if(!action) return;
+    if(action==='garmin-new-token')return generateGarminToken();
+    if(action==='garmin-sync')return syncGarmin();
+    if(action==='garmin-disconnect')return disconnectGarmin();
     if(action==='expand-chart') return expandChart(button.dataset.chart);
     if(action==='sleep-start') return startSleep();
     if(action==='sleep-wake') return wakeSleep();
@@ -799,10 +988,10 @@
     if(action==='remove-set') {workoutDraft.exercises[Number(button.dataset.ex)].sets.splice(Number(button.dataset.set),1);return renderWorkoutEditor();}
     if(action==='view-exercise') {selectedExercise=button.dataset.name;exerciseMetric=exerciseSeries(selectedExercise,'max').every(point=>point.value===0)?'reps':'max';progressMetric='exercise';tab='progress';render();window.scrollTo({top:0,behavior:'smooth'});return;}
     if(action.startsWith('edit-')) {const type=action.slice(5)==='workout'?'workouts':action.slice(5);const row=state[type]?.find(item=>item.id===rowId);if(row) type==='workouts'?openWorkout(row):openSimple(type,row);return;}
-    if(action.startsWith('delete-')) {const type=action.slice(7)==='workout'?'workouts':action.slice(7);if(!state[type]?.some(item=>item.id===rowId)) return;if(confirm('Poistetaanko tämä merkintä?')) {const nextState={...state,[type]:state[type].filter(item=>item.id!==rowId)};if(!persist(nextState))return;state=nextState;render();toast('Merkintä poistettu');}return;}
+    if(action.startsWith('delete-')) {const type=action.slice(7)==='workout'?'workouts':action.slice(7);if(!state[type]?.some(item=>item.id===rowId)) return;if(confirm('Poistetaanko tämä merkintä?')) {const nextState={...state,[type]:state[type].filter(item=>item.id!==rowId)};if(!persist(nextState))return;if(type==='weight')cancelGarminSync();state=nextState;render();toast('Merkintä poistettu');}return;}
     if(action==='export') return exportBackup();
     if(action==='import') return document.getElementById('import-file').click();
-    if(action==='clear') {if(confirm('Poistetaanko kaikki treenit, yömerkinnät, aloitettu yö ja painot tältä laitteelta? Toimintoa ei voi perua ilman varmuuskopiota.')) {const nextState=emptyState();if(state.settings)nextState.settings=state.settings;if(!persist(nextState))return;state=nextState;render();toast('Kaikki merkinnät poistettu');}return;}
+    if(action==='clear') {if(confirm('Poistetaanko kaikki treenit, yömerkinnät, aloitettu yö ja painot tältä laitteelta? Toimintoa ei voi perua ilman varmuuskopiota.')) {const nextState=emptyState();if(state.settings)nextState.settings=state.settings;if(!persist(nextState))return;cancelGarminSync();state=nextState;render();toast('Kaikki merkinnät poistettu');}return;}
     if(action==='install'&&deferredInstall) {deferredInstall.prompt();deferredInstall.userChoice.finally(()=>{deferredInstall=null;render();});}
   });
   document.addEventListener('keydown',event=>{
@@ -829,6 +1018,8 @@
     }
   });
   document.addEventListener('submit',event=>{
+    if(event.target.id==='garmin-window-form'){event.preventDefault();return saveGarminWindow(event.target);}
+    if(event.target.id==='garmin-connection-form'){event.preventDefault();return saveGarminConnection(event.target);}
     if(event.target.id==='simple-form') {event.preventDefault();saveSimple(event.target);}
     if(event.target.id==='rest-settings-form') {event.preventDefault();saveRestSettings(event.target);}
   });
@@ -849,7 +1040,7 @@
     try {
       if(file.size>5_000_000) throw Error('Tiedosto on liian suuri.');
       const imported=validateBackup(JSON.parse(await file.text()));
-      if(confirm('Korvataanko tämän selaimen nykyiset merkinnät varmuuskopion tiedoilla?') && persist(imported)) {state=imported;tab='home';render();toast('Varmuuskopio tuotu');}
+      if(confirm('Korvataanko tämän selaimen nykyiset merkinnät varmuuskopion tiedoilla?') && persist(imported)) {cancelGarminSync();state=imported;tab='home';render();toast('Varmuuskopio tuotu');}
     } catch(err) {alert(`Tuonti epäonnistui: ${err.message}`);}
   });
   dialog.addEventListener('click',event=>{if(event.target===dialog) {cancelPendingSetTimers();dialog.close();}});
@@ -860,8 +1051,11 @@
   document.addEventListener('wheel',event=>{if (dialog.open && !event.target.closest?.('.dialog-inner')) event.preventDefault();},{passive:false});
   document.addEventListener('visibilitychange',renderRestTimer);
   window.addEventListener('pageshow',renderRestTimer);
+  window.addEventListener('pageshow',()=>syncGarmin({automatic:true}));
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='hidden')syncGarmin({automatic:true});});
   window.addEventListener('resize',sizeCharts);
   window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();deferredInstall=event;if(tab==='settings')render();});
   if('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(()=>{});
   render();
+  syncGarmin({automatic:true});
 })();

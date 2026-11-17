@@ -16,12 +16,14 @@ Sovellustiedostot tuotiin GitHubiin alkuperäisen projektin versiosta `2841d89c3
 
 ## Tekniikka ja tiedostokartta
 
-Sovellus on build-vaiheeton HTML/CSS/JavaScript-PWA. Se ei käytä palvelinta, kirjautumista, tietokantaa tai selainpuolen npm-riippuvuuksia. GitHub Pages -osoite on julkinen; henkilökohtaiset merkinnät pysyvät kunkin käyttäjän omassa selaimessa.
+Sovellus on build-vaiheeton HTML/CSS/JavaScript-PWA ilman selainpuolen npm-riippuvuuksia, kirjautumista tai yhteistä tietokantaa. Valinnainen Garmin-aamupainojen haku käyttää käyttäjän erikseen julkaisemaa Cloudflare Workeria. GitHub Pages -osoite on julkinen; henkilökohtaiset merkinnät pysyvät kunkin käyttäjän omassa selaimessa. Garmin-toteutus ja sen rajat: [GARMIN.md](GARMIN.md).
 
 | Tiedosto | Tehtävä |
 | --- | --- |
 | `index.html` | Sovelluksen runko, navigaatio, natiivi dialogi, varmuuskopion tiedostokenttä ja ajastimen ulompi paikka |
 | `app.js` | Tallennus, näkymät, SVG-käyrät, lomakkeet, yksiköt, historiahaut ja ajastin yhdessä IIFE-sulkeumassa |
+| `garmin-core.js` | Aamupunnitusten Helsingin aikarajaus, validointi ja manuaalisia kirjauksia suojaava yhdistäminen |
+| `garmin-worker/` | Erillinen Cloudflare Worker, sen käyttöönotto-ohje, julkaisuasetukset ja synteettiset testit |
 | `styles.css` | Responsiivinen vihreä käyttöliittymä, mobiilinavigaatio, dialogi ja taukoajastin |
 | `manifest.webmanifest` | PWA:n nimi, kuvakkeet, aloitusosoite ja scope |
 | `sw.js` | Sovellustiedostojen esivälimuisti ja verkkoyhteyttä ensin käyttävä resurssihaku |
@@ -80,6 +82,8 @@ Seuraava esimerkki on synteettinen. Valinnaisia kenttiä ei välttämättä ole 
 - `exercise.unit`: `kg` tai `lbs`. Puuttuva kenttä tarkoittaa lukuvaiheessa kg:aa. Painon lukuarvon merkitys ei riipu tästä kentästä: tallennettu paino on aina kg.
 - `sleepPending`: `{ id, startedAt, endedAt? }`. `id` on ei-tyhjä enintään 100 merkin tunniste. Aikaleimat ovat muotoa `YYYY-MM-DDTHH:mm:ss.sssZ`; mahdollinen `endedAt` on vähintään `startedAt`. Vanhoissa tiedoissa kenttä voi puuttua. Aloitettua yötä ei siirretä valmiisiin yömerkintöihin ennen tarkistuksen tallennusta.
 - `settings.restSeconds`: kokonaisluku 15–1800. Puuttuva asetus tarkoittaa lukuvaiheessa 180 sekuntia; puuttuvaa kenttää ei kirjoiteta käynnistyksessä.
+- `settings.garmin`: valinnainen `{ start: '06:00', end: '12:00' }`. Kellonajat tarkoittavat saman päivän Helsingin aikaa, alku mukaan lukien ja loppu pois lukien. Alkuaika on ennen loppuaikaa. Asetus kulkee version 1 varmuuskopiossa ja säilyy taukoasetusta muutettaessa.
+- Garminista tuodun painorivin valinnaiset kentät ovat `source: 'garmin'`, `garminId` ja `measuredAt` (ISO). Muut painorivit säilyvät käsinkirjauksina, eikä niihin lisätä alkuperää automaattisesti. Painot tallentuvat edelleen kilogrammoina. Yhteysasetukset ovat eri localStorage-avaimessa ja jäävät varmuuskopion ulkopuolelle.
 
 Editorin `_weightEdited`, `_weightSuggested`, `_unitEdited`, `_canonicalInput`, `_canonicalWeight` ja `_restStarted` ovat vain luonnoksen väliaikaisia tietoja. Sarjojen tallennus muodostaa puhtaat `{ weight, reps }`-oliot, joten nämä liput eivät päädy vientiin.
 
