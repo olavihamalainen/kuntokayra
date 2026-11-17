@@ -157,14 +157,12 @@ await test("Current and legacy backup export/import/reopen preserve values, cate
       oldSeries,
     );
     assert.deepEqual(
-      b
-        .state()
-        .workouts.map((r) => ({
-          date: r.date,
-          category: r.category,
-          exercises: r.exercises,
-          savedAt: r.savedAt,
-        })),
+      b.state().workouts.map((r) => ({
+        date: r.date,
+        category: r.category,
+        exercises: r.exercises,
+        savedAt: r.savedAt,
+      })),
       initial.workouts.map((r) => ({
         date: r.date,
         category: r.category,
@@ -330,7 +328,7 @@ await test("Add-set preserves inner and outer scroll and focuses new weight with
   assert.equal(a.focusCalls.at(-1).options.preventScroll, true);
   assert.equal(a.document.activeElement.dataset.set, "1");
 });
-await test("Add-exercise returns focus to available suggestion area with preserved draft values", async () => {
+await test("Add-exercise focuses the new movement name with preserved draft values", async () => {
   const a = boot(history);
   await a.click("new-workout");
   await a.input("name", "Ensimmäinen oma");
@@ -340,11 +338,8 @@ await test("Add-exercise returns focus to available suggestion area with preserv
   assert.equal(a.draft().exercises.length, 2);
   assert.equal(a.weight(), "33");
   const active = a.document.activeElement;
-  assert.ok(
-    active?.className.includes("suggestion-button") ||
-      active?.className.includes("exercise-suggestions"),
-    "Expected focus in existing suggestion area",
-  );
+  assert.equal(active?.id, "exercise-1");
+  assert.equal(active?.attributes.type, "text");
 });
 await test("Previous reps show latest matching session/index/date without prefilling inputs", async () => {
   const a = boot(history);
@@ -585,8 +580,8 @@ await test("Editing completed set does not restart rest; completing next set sta
   assert.equal(a.countdown(), "3:00");
   assert.ok(
     a.document
-      .getElementById("dialog-rest-timer-host")
-      .innerHTML.includes("sarja 2"),
+      .getElementById("dialog-rest-timer-host-context")
+      .textContent.includes("sarja 2"),
   );
 });
 await test("Rest cancel/restart work, close keeps active countdown and cancels pending start", async () => {
@@ -603,8 +598,9 @@ await test("Rest cancel/restart work, close keeps active countdown and cancels p
   await a.click("close");
   await a.clock.tick(1000);
   assert.equal(a.countdown(), "2:59");
-  assert.ok(
-    a.document.getElementById("rest-timer-host").innerHTML.includes("2:59"),
+  assert.equal(
+    a.document.getElementById("rest-timer-host-countdown").textContent,
+    "2:59",
   );
   await a.click("rest-cancel");
   assert.equal(a.countdown(), null);
@@ -704,3 +700,10 @@ await test("Harness captures focused field options and independent scroll positi
   assert.equal(a.window.scrollY, 180);
   assert.equal(a.scrollCalls.at(-1).target, "window");
 });
+
+// New sleep-session and viewport guards share the same dependency-free runner.
+await import("./sleep-and-modal.test.mjs");
+
+await import("./mobile-rest-settings.test.mjs");
+
+await import("./charts.test.mjs");

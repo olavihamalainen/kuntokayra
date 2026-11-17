@@ -16,7 +16,7 @@ assert.match(
 // Only this in-memory test copy exposes state; app.js is never modified.
 const source = appSource.replace(
   /\}\)\(\);\s*$/,
-  `globalThis.__test = {getState:()=>state,getDraft:()=>workoutDraft,exerciseSeries,rawSeries,validateBackup,openWorkout,renderWorkoutEditor};\n})();`,
+  `globalThis.__test = {getState:()=>state,getDraft:()=>workoutDraft,exerciseSeries,rawSeries,validateBackup,openWorkout,renderWorkoutEditor,chartAxis,sleepSummary,chart,getCharts:()=>charts};\n})();`,
 );
 export const plain = (value) => JSON.parse(JSON.stringify(value));
 const decode = (value) =>
@@ -42,6 +42,8 @@ export function boot(initial, existingStorage) {
     blobs = [],
     alerts = [],
     downloads = [],
+    confirmations = [],
+    eventRegistrations = [],
     focusCalls = [],
     scrollCalls = [];
   // Deterministic clock shared by Date and timers. jumpClock intentionally models
@@ -131,7 +133,70 @@ export function boot(initial, existingStorage) {
           this.dataset[
             k.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase())
           ] = v;
-      this.classList = { add() {}, remove() {}, toggle() {} };
+      this.style = {
+        position: "",
+        top: "",
+        width: "",
+        left: "",
+        right: "",
+        overflow: "",
+        height: "",
+      };
+      Object.defineProperties(this.style, {
+        setProperty: {
+          value(name, value) {
+            this[name.replace(/-([a-z])/g, (_, char) => char.toUpperCase())] =
+              String(value);
+          },
+        },
+        getPropertyValue: {
+          value(name) {
+            return (
+              this[
+                name.replace(/-([a-z])/g, (_, char) => char.toUpperCase())
+              ] || ""
+            );
+          },
+        },
+        removeProperty: {
+          value(name) {
+            const property = name.replace(/-([a-z])/g, (_, char) =>
+                char.toUpperCase(),
+              ),
+              previous = this[property] || "";
+            this[property] = "";
+            return previous;
+          },
+        },
+      });
+      const updateClasses = (values) => {
+        this.className = [...values].join(" ");
+        this.attributes.class = this.className;
+      };
+      this.classList = {
+        add: (...names) =>
+          updateClasses(
+            new Set([...this.className.split(/\s+/).filter(Boolean), ...names]),
+          ),
+        remove: (...names) =>
+          updateClasses(
+            new Set(
+              this.className
+                .split(/\s+/)
+                .filter((name) => name && !names.includes(name)),
+            ),
+          ),
+        contains: (name) => this.className.split(/\s+/).includes(name),
+        toggle: (name, force) => {
+          const values = new Set(this.className.split(/\s+/).filter(Boolean));
+          const added =
+            force === undefined ? !values.has(name) : Boolean(force);
+          if (added) values.add(name);
+          else values.delete(name);
+          updateClasses(values);
+          return added;
+        },
+      };
       this.scrollTop = 0;
       this.scrollLeft = 0;
       this.scrollHeight = 1600;
@@ -143,59 +208,69 @@ export function boot(initial, existingStorage) {
     }
     set innerHTML(html) {
       this._html = html;
+      this._textContent = "";
       const removeTree = (old) => {
         for (const child of old.children) removeTree(child);
-        const i = nodes.indexOf(old);
-        if (i >= 0) nodes.splice(i, 1);
+        const index = nodes.indexOf(old);
+        if (index >= 0) nodes.splice(index, 1);
         if (old.id && ids.get(old.id) === old) ids.delete(old.id);
       };
       for (const old of this.children) removeTree(old);
       this.children = [];
-      for (const tag of html.matchAll(
-        /<(input|button|select|option|datalist|div|p|span|section|article|details|summary|output|label|strong|small|aside)\b([^>]*)>/g,
-      )) {
+      const stack = [this], parsed = [];
+      const voidTags = new Set(["input", "img", "br", "hr", "meta", "link", "area", "base", "embed", "param", "source", "track", "wbr"]);
+      for (const token of html.matchAll(/<\/?([A-Za-z][A-Za-z0-9:-]*)\b([^>]*)>|([^<]+)/g)) {
+        if (token[3] !== undefined) {
+          stack.at(-1)._textContent += decode(token[3]);
+          continue;
+        }
+        const tagName = token[1].toLowerCase();
+        if (token[0].startsWith("</")) {
+          for (let index = stack.length - 1; index > 0; index--) {
+            if (stack[index].tagName === tagName) { stack.length = index; break; }
+          }
+          continue;
+        }
         const attrs = {};
-        for (const a of tag[2].matchAll(/([\w-]+)(?:="([^"]*)")?/g))
-          attrs[a[1]] = decode(a[2] || "");
-        const node = new Element(tag[1], attrs);
-        node.parentElement = this;
-        node.textContent = decode(
-          html.slice(tag.index + tag[0].length).split("<")[0],
-        );
-        this.children.push(node);
+        for (const attr of token[2].matchAll(/([\w:-]+)(?:="([^"]*)"|='([^']*)'|=([^\s>]+))?/g)) {
+          if (attr[1] !== "/") attrs[attr[1]] = decode(attr[2] ?? attr[3] ?? attr[4] ?? "");
+        }
+        const node = new Element(tagName, attrs), parent = stack.at(-1);
+        node.parentElement = parent;
+        parent.children.push(node);
+        parsed.push(node);
+        if (!voidTags.has(tagName) && !/\/\s*>$/.test(token[0])) stack.push(node);
       }
-      for (const select of this.children.filter(
-        (n) => n.tagName === "select",
-      )) {
-        const block =
-          html.match(
-            new RegExp(
-              `<select[^>]*id="${select.id}"[^>]*>([\\s\\S]*?)<\\/select>`,
-            ),
-          )?.[1] || "";
-        const options = [...block.matchAll(/<option\b([^>]*)>/g)].map((m) => {
-          const at = {};
-          for (const a of m[1].matchAll(/([\w-]+)(?:="([^"]*)")?/g))
-            at[a[1]] = decode(a[2] || "");
-          return at;
-        });
-        select.value =
-          (options.find((o) => "selected" in o) || options[0])?.value || "";
+      for (const select of parsed.filter(node => node.tagName === "select")) {
+        const options = select.querySelectorAll("option");
+        select.value = (options.find(option => "selected" in option.attributes) || options[0])?.attributes.value || "";
       }
     }
+    get textContent() {
+      return (this._textContent || "") + (this.children || []).map(child => child.textContent).join("");
+    }
+    set textContent(value) { this._textContent = String(value); }
     get innerHTML() {
       return this._html || "";
     }
-    querySelector(sel) {
-      return nodes.find((n) => matches(n, sel)) || null;
-    }
+    querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
     querySelectorAll(sel) {
-      return nodes.filter((n) => matches(n, sel));
+      const descendants = [];
+      const visit = node => { for (const child of node.children) { if (matches(child, sel)) descendants.push(child); visit(child); } };
+      visit(this);
+      return descendants;
     }
     closest(sel) {
-      return matches(this, sel) ? this : null;
+      for (let node = this; node; node = node.parentElement) if (matches(node, sel)) return node;
+      return null;
     }
-    addEventListener(type, fn) {
+    addEventListener(type, fn, options) {
+      eventRegistrations.push({
+        scope: "element",
+        target: this.id || this.tagName,
+        type,
+        options,
+      });
       const list = this.listeners.get(type) || [];
       list.push(fn);
       this.listeners.set(type, list);
@@ -261,6 +336,7 @@ export function boot(initial, existingStorage) {
       delete this.attributes[name];
     }
     append(node) {
+      node.parentElement = this;
       this.children.push(node);
     }
     remove() {}
@@ -284,8 +360,11 @@ export function boot(initial, existingStorage) {
     "rest-timer-host",
   ])
     new Element("div", { id });
+  ids.get("dialog-content").parentElement = ids.get("entry-dialog");
+  ids.get("entry-dialog").children.push(ids.get("dialog-content"));
   new Element("button", { class: "settings-button" });
   const body = new Element("body");
+  const documentElement = new Element("html");
   const document = {
     activeElement: null,
     hidden: false,
@@ -295,7 +374,9 @@ export function boot(initial, existingStorage) {
     querySelectorAll: (sel) => nodes.filter((n) => matches(n, sel)),
     createElement: (tag) => new Element(tag),
     body,
-    addEventListener(type, fn) {
+    documentElement,
+    addEventListener(type, fn, options) {
+      eventRegistrations.push({ scope: "document", type, options });
       const list = listeners.get(type) || [];
       list.push(fn);
       listeners.set(type, list);
@@ -321,7 +402,8 @@ export function boot(initial, existingStorage) {
     scrollY: 0,
     scrollX: 0,
     pageYOffset: 0,
-    addEventListener(type, fn) {
+    addEventListener(type, fn, options) {
+      eventRegistrations.push({ scope: "window", type, options });
       const list = windowListeners.get(type) || [];
       list.push(fn);
       windowListeners.set(type, list);
@@ -339,6 +421,21 @@ export function boot(initial, existingStorage) {
       });
     },
   };
+  const viewportListeners = new Map();
+  browserWindow.innerHeight = 844;
+  browserWindow.innerWidth = 390;
+  browserWindow.visualViewport = {
+    height: 844,
+    width: 390,
+    offsetTop: 0,
+    offsetLeft: 0,
+    scale: 1,
+    addEventListener(type, fn) {
+      const items = viewportListeners.get(type) || [];
+      items.push(fn);
+      viewportListeners.set(type, items);
+    },
+  };
   const context = vm.createContext({
     document,
     localStorage,
@@ -347,6 +444,29 @@ export function boot(initial, existingStorage) {
     Intl,
     Date: ClockDate,
     Blob,
+    FormData: class FakeFormData {
+      constructor(form) {
+        assert.equal(
+          form?.tagName,
+          "form",
+          "FormData requires a rendered form",
+        );
+        this.values = new Map(
+          document
+            .querySelectorAll("input[name],select[name]")
+            .map((field) => [field.attributes.name, field.value]),
+        );
+      }
+      get(name) {
+        return this.values.get(name) ?? null;
+      }
+      has(name) {
+        return this.values.has(name);
+      }
+      entries() {
+        return this.values.entries();
+      }
+    },
     crypto: webcrypto,
     performance: { now: () => clockNow - clockOrigin },
     URL: {
@@ -363,14 +483,33 @@ export function boot(initial, existingStorage) {
     requestAnimationFrame: (fn) =>
       schedule(() => fn(clockNow - clockOrigin), 16, false, []),
     cancelAnimationFrame: (handle) => timers.delete(handle),
-    confirm: () => confirmation,
+    confirm: (message) => {
+      confirmations.push(message);
+      return confirmation;
+    },
     alert: (message) => alerts.push(message),
     console,
   });
   vm.runInContext(source, context, { filename: appPath });
-  const emit = async (type, target) => {
-    for (const fn of listeners.get(type) || [])
-      await fn({ target, preventDefault() {} });
+  const makeEvent = (type, target, fields = {}) => ({
+    type,
+    target,
+    cancelable: true,
+    defaultPrevented: false,
+    ...fields,
+    preventDefault() {
+      if (this.cancelable) this.defaultPrevented = true;
+    },
+  });
+  const emit = async (type, target, fields = {}) => {
+    const event = makeEvent(type, target, fields);
+    for (const fn of listeners.get(type) || []) await fn(event);
+    return event;
+  };
+  const emitElement = async (type, target, fields = {}) => {
+    const event = makeEvent(type, target, fields);
+    for (const fn of target.listeners.get(type) || []) await fn(event);
+    return event;
   };
   const input = async (field, value, ex = 0, set = 0, type = "input") => {
     const selector =
@@ -407,22 +546,48 @@ export function boot(initial, existingStorage) {
     blobs,
     alerts,
     downloads,
+    confirmations,
+    eventRegistrations,
     focusCalls,
     scrollCalls,
     clock: {
       tick,
       jump: (milliseconds) => (clockNow += milliseconds),
+      set: (milliseconds) => (clockNow = milliseconds),
       now: () => clockNow,
       timerCount: () => timers.size,
     },
     evaluate: (code) => vm.runInContext(code, context),
-    emitWindow: async (type) => {
-      for (const fn of windowListeners.get(type) || []) await fn({ type });
+    emitWindow: async (type, fields = {}) => {
+      const event = makeEvent(type, browserWindow, fields);
+      for (const fn of windowListeners.get(type) || []) await fn(event);
+      return event;
     },
+    emitViewport: async (type, values = {}) => {
+      Object.assign(browserWindow.visualViewport, values);
+      const event = makeEvent(type, browserWindow.visualViewport);
+      for (const fn of viewportListeners.get(type) || []) await fn(event);
+      return event;
+    },
+    emitElement,
     click,
     input,
     emit,
     importBackup,
+    fillSimple: async (values) => {
+      for (const [name, value] of Object.entries(values)) {
+        const field = document.querySelector(`[name="${name}"]`);
+        assert.ok(field, `Missing simple form field ${name}`);
+        field.value = String(value);
+        await emit("input", field);
+      }
+    },
+    submitSimple: () => {
+      const form = document.getElementById("simple-form");
+      assert.ok(form, "Missing rendered simple form");
+      return emit("submit", form);
+    },
+    simpleValue: (name) => document.querySelector(`[name="${name}"]`)?.value,
     api: context.__test,
     setStorageFailure: (value) => (storageFailure = value),
     setConfirmation: (value) => (confirmation = value),
