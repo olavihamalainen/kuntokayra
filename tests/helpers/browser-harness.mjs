@@ -100,6 +100,7 @@ export function boot(initial, existingStorage, options = {}) {
     await Promise.resolve();
   };
   let confirmation = true,
+    confirmationQueue = [],
     storageFailure = false;
   function matches(node, selector) {
     return selector.split(",").some((part) => {
@@ -253,6 +254,7 @@ export function boot(initial, existingStorage, options = {}) {
         const options = select.querySelectorAll("option");
         select.value = (options.find(option => "selected" in option.attributes) || options[0])?.attributes.value || "";
       }
+      for (const textarea of parsed.filter(node => node.tagName === "textarea")) textarea.value = textarea.textContent;
     }
     get textContent() {
       return (this._textContent || "") + (this.children || []).map(child => child.textContent).join("");
@@ -470,7 +472,7 @@ export function boot(initial, existingStorage, options = {}) {
         );
         this.values = new Map(
           document
-            .querySelectorAll("input[name],select[name]")
+            .querySelectorAll("input[name],select[name],textarea[name]")
             .map((field) => [field.attributes.name, field.value]),
         );
       }
@@ -505,7 +507,7 @@ export function boot(initial, existingStorage, options = {}) {
     cancelAnimationFrame: (handle) => timers.delete(handle),
     confirm: (message) => {
       confirmations.push(message);
-      return confirmation;
+      return confirmationQueue.length?confirmationQueue.shift():confirmation;
     },
     alert: (message) => alerts.push(message),
     console,
@@ -616,6 +618,7 @@ export function boot(initial, existingStorage, options = {}) {
     api: context.__test,
     setStorageFailure: (value) => (storageFailure = value),
     setConfirmation: (value) => (confirmation = value),
+    setConfirmations: (values) => (confirmationQueue = [...values]),
     state: () => plain(context.__test.getState()),
     draft: () => plain(context.__test.getDraft()),
     html: () => document.getElementById("dialog-content").innerHTML,

@@ -10,7 +10,7 @@ Koodivaraston juuressa:
 npm test
 ```
 
-Komento tarkistaa `app.js`-, `garmin-core.js`-, `sw.js`- ja `garmin-worker/worker.mjs`-tiedostojen syntaksin ja ajaa **142 testiä** Node.js:n omalla testiajurilla. `tests/regression.test.mjs` käynnistää myös `sleep-and-modal.test.mjs`-, `mobile-rest-settings.test.mjs`-, `charts.test.mjs`-, `garmin-core.test.mjs`- ja `garmin-integration.test.mjs`-tiedostojen testit. Erilliset Worker-testit kuuluvat samaan npm-komentoon. Epäonnistuminen tuottaa ei-nollan paluukoodin. Syntaksin voi tarkistaa erikseen komennolla `npm run check` ja käyrät komennolla `node --test tests/charts.test.mjs`.
+Komento tarkistaa sovelluksen ja Garmin-Workerin neljän JavaScript-tiedoston syntaksin ja ajaa **190 testiä** Node.js:n omalla testiajurilla. `tests/regression.test.mjs` tuo vanhojen testien lisäksi Garmin-, treeniohjelma-, seuraava treeni- ja editorin viimeistelytestit. Workerin 27 testiä ajetaan samassa npm-komennossa. Syntaksin voi tarkistaa erikseen komennolla `npm run check`.
 
 Testien tiedostopolut lasketaan moduulin sijainnista. Ne eivät edellytä alkuperäistä työtilaa tai tätä keskustelua. [GitHub Actions](../.github/workflows/tests.yml) ajaa saman `npm test` -komennon push- ja pull request -tapahtumissa.
 
@@ -41,7 +41,7 @@ Kevyet korvikkeet mallintavat DOM-elementtejä, localStoragea, tiedoston tuontia
 | Käyrien käyttö | Vain 30 pv -pistevalinta myös suurennettuna, muiden jaksojen valinnan esto, näppäimistö ja päällekkäiset osumakohdat |
 | Käyrien koko | Muuttuva viewBox 260–950 px leveyksillä, kaikkien pisteiden rajat, valinnan säilyminen ja rajattu rekisteri ilman tallennuskirjoituksia |
 
-Testimäärä jakautuu alkuperäisiin 35 testiin, yön ja dialogin 15 testiin, mobiilin ja asetusten 12 testiin, käyrien 19 testiin sekä Garmin-ytimen 18, selainintegraation 16 ja Workerin 27 testiin. Garmin-testit kattavat myös grammoista kilogrammoihin kulkevan Worker–selain–tallennusketjun, ensimmäisen aamupunnituksen, aikaikkunan ja kesäajan, toistuvan haun, manuaalisten painojen suojan, virhetilanteet, varmuuskopiot, myöhäiset vastaukset ja molempien julkaisuosoitteiden CORS-rajauksen. Verkkopyynnöt ja avaimet ovat synteettisiä. Testit eivät todista oikeaa Garmin-hakua tai visuaalista oikeellisuutta.
+Testimäärä jakautuu aiempiin 81 sovellustestiin, Garmin-ytimen 18, Garmin-selainintegraation 16, Workerin 27, treeniohjelman 17, seuraavan treenin/luonnoksen/järjestelyn 19 ja editorin viimeistelyn 12 testiin. Viimeistely kattaa molemmat poistovahvistukset ja niiden peruuttamisen, poistojen tallennusvirheet, 30 päivän pikakäyrät sekä simuloidut pysty–vaaka–pysty-käännöt ja sulkemisen aktiivisen ajastimen kanssa. Testit eivät todista oikean puhelinselaimen asettelua tai kosketusosumia. Julkaisu ei sisällä esikatselun kuvitteellista varmuuskopiota tai sitä vaativia testejä.
 
 ## Oikeassa selaimessa tehtävät tarkistukset
 

@@ -4,7 +4,12 @@
   const GARMIN_CONNECTION_KEY = 'kuntokayra_garmin_connection_v1';
   const Garmin = globalThis.KuntokayraGarmin;
   const PERIODS = [['30', '30 pv'], ['90', '3 kk'], ['180', '6 kk'], ['365', '12 kk'], ['all', 'Kaikki']];
-  const CATEGORIES = ['Etukroppa', 'Takakroppa'];
+  const WORKOUT_PROGRAMS = [
+    {type:'front-back',label:'Etukroppa / Takakroppa',categories:['Etukroppa','Takakroppa']},
+    {type:'push-pull-legs',label:'Push / Pull / Legs',categories:['Push','Pull','Legs']},
+    {type:'upper-lower',label:'Upper / Lower',categories:['Upper','Lower']},
+    {type:'fullbody',label:'Fullbody',categories:['Fullbody']}
+  ];
   const UNGROUPED_EXERCISES = ['Forkut'];
   const KG_PER_LB = 0.45359237;
   const fmt = new Intl.NumberFormat('fi-FI', { maximumFractionDigits: 1 });
@@ -39,6 +44,10 @@
   let exerciseMetric = 'max';
   let selectedExercise = '';
   let workoutDraft = null;
+  let workoutDraftId = null;
+  let workoutDraftSaveTimer = null;
+  let workoutOrderOpen = false;
+  let exerciseDrag = null;
   let editingId = null;
   let deferredInstall = null;
   let toastTimer;
@@ -53,6 +62,8 @@
   const charts = new Map();
   let expandedChartId = null;
   let chartResizeObserver = null;
+  let chartLayoutFrame = null;
+  let chartLayoutTimer = null;
 
   function svg(name) { return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || icons.progress}</svg>`; }
   function esc(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c])); }
@@ -96,6 +107,83 @@
   function persist(nextState = state) {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState)); return true; }
     catch (_) { toast('Tallennus ei onnistunut. Tarkista selaimen tallennustila.'); return false; }
+  }
+  function readPendingWorkout(value) {
+    if(!value || typeof value!=='object' || typeof value.id!=='string' || !value.id.trim() || value.id.length>100 || !validTimestamp(value.savedAt) || (value.date!=='' && !validDate(value.date)) || !Array.isArray(value.exercises) || value.exercises.length>100)return null;
+    if(value.category!==undefined && value.category!==null && value.category!=='' && !isCategory(value.category))return null;
+    const exercises=[];
+    for(const ex of value.exercises){
+      if(!ex || typeof ex.name!=='string' || ex.name.length>80 || !['kg','lbs'].includes(ex.unit) || typeof ex.unitEdited!=='boolean' || !Array.isArray(ex.sets) || ex.sets.length>100)return null;
+      const sets=[];
+      for(const set of ex.sets){
+        if(!set || typeof set.weight!=='string' || set.weight.length>32 || typeof set.reps!=='string' || set.reps.length>32 || ['weightEdited','weightSuggested','completed'].some(key=>typeof set[key]!=='boolean'))return null;
+        const clean={weight:set.weight,reps:set.reps,weightEdited:set.weightEdited,weightSuggested:set.weightSuggested,completed:set.completed};
+        if(set.canonicalWeight!==undefined){
+          if(typeof set.canonicalWeight!=='number' || !Number.isFinite(set.canonicalWeight) || set.canonicalWeight<0 || set.canonicalWeight>2000 || inputWeight(fromKg(set.canonicalWeight,ex.unit))!==set.weight)return null;
+          clean.canonicalWeight=set.canonicalWeight;
+        }
+        sets.push(clean);
+      }
+      exercises.push({name:ex.name,unit:ex.unit,unitEdited:ex.unitEdited,sets});
+    }
+    return {id:value.id,savedAt:value.savedAt,date:value.date,...(value.category!==undefined?{category:value.category}:{}),exercises};
+  }
+  function pendingWorkout() { return readPendingWorkout(state.workoutPending); }
+  function cancelWorkoutDraftSave() { clearTimeout(workoutDraftSaveTimer);workoutDraftSaveTimer=null; }
+  function draftStatus(message, failed=false) {
+    const node=document.getElementById('workout-draft-status');
+    if(node){if(node.textContent!==message)node.textContent=message;node.classList.toggle('save-failed',failed);}
+  }
+  function workoutDraftPayload() {
+    return {id:workoutDraftId,date:workoutDraft.date,...(workoutDraft.category!==undefined?{category:workoutDraft.category}:{}),exercises:workoutDraft.exercises.map(ex=>({name:ex.name,unit:exerciseUnit(ex),unitEdited:!!ex._unitEdited,sets:ex.sets.map(set=>({weight:String(set.weight),reps:String(set.reps),weightEdited:!!set._weightEdited,weightSuggested:!!set._weightSuggested,completed:!!set._restStarted || validDraftSet(ex,set),...(set._canonicalInput===String(set.weight) && Number.isFinite(set._canonicalWeight) && set._canonicalWeight>=0 && set._canonicalWeight<=2000?{canonicalWeight:set._canonicalWeight}:{})}))}))};
+  }
+  function saveWorkoutDraft() {
+    cancelWorkoutDraftSave();
+    if(!workoutDraft || editingId || !workoutDraftId)return true;
+    const previous=pendingWorkout();
+    const meaningful=workoutDraft.exercises.some(ex=>ex.name.trim() || ex.sets.some(set=>String(set.weight).trim() || String(set.reps).trim()));
+    if(!meaningful && previous?.id!==workoutDraftId)return true;
+    const payload=workoutDraftPayload(),pending=readPendingWorkout({...payload,savedAt:new Date().toISOString()});
+    if(!pending){draftStatus('Luonnosta ei tallennettu. Tarkista kenttien pituudet.',true);return false;}
+    if(previous){const {savedAt,...previousPayload}=previous;if(JSON.stringify(previousPayload)===JSON.stringify(payload)){draftStatus('Keskeneräinen treeni tallessa');return true;}}
+    const nextState={...state,workoutPending:pending};
+    if(!persist(nextState)){draftStatus('Luonnos ei tallentunut. Pidä lomake auki ja yritä uudelleen.',true);return false;}
+    state=nextState;draftStatus('Keskeneräinen treeni tallessa');updateNextWorkoutCard();
+    return true;
+  }
+  function scheduleWorkoutDraftSave() {
+    if(!workoutDraft || editingId)return;
+    cancelWorkoutDraftSave();draftStatus('Tallennetaan keskeneräistä treeniä…');
+    workoutDraftSaveTimer=setTimeout(saveWorkoutDraft,500);
+  }
+  function resetWorkoutEditor() {
+    cancelWorkoutDraftSave();finishExerciseDrag(false);cancelPendingSetTimers();
+    workoutDraft=null;workoutDraftId=null;workoutOrderOpen=false;
+  }
+  function closeEntryDialog() {
+    if(!saveWorkoutDraft())return;
+    resetWorkoutEditor();dialog.close();
+  }
+  function deleteCurrentWorkout() {
+    if(!workoutDraft)return;
+    const recorded=editingId?state.workouts.find(row=>row.id===editingId):null;
+    if(editingId && !recorded){toast('Tallennettua treeniä ei löytynyt.');return;}
+    if(!confirm(recorded?`Poistetaanko ${fullDate(recorded.date)} tallennettu treeni?`:'Poistetaanko tämä keskeneräinen treeni?'))return;
+    if(!confirm('Vahvista vielä poistaminen. Tämä treeni poistetaan pysyvästi.'))return;
+    const nextState={...state};
+    if(recorded)nextState.workouts=state.workouts.filter(row=>row.id!==editingId);
+    else if(nextState.workoutPending?.id===workoutDraftId)delete nextState.workoutPending;
+    if(!persist(nextState))return;
+    state=nextState;resetWorkoutEditor();dialog.close();render();toast('Treeni poistettu');
+  }
+  function nextWorkoutSource(category=nextCategory()) { return recentWorkouts().find(row=>row.category===category)||null; }
+  function nextWorkoutContent() {
+    const pending=pendingWorkout(),category=pending?.category||nextCategory(),source=nextWorkoutSource(category);
+    return `<div class="metric-top">${pending?'Jatka treeniä':'Seuraava treeni'} <span class="metric-icon green">${svg('workouts')}</span></div><div class="metric-value next-workout-value">${esc(category)}</div><div class="metric-note">${pending?`${pending.exercises.length} liikettä · keskeneräinen`:source?`Viimeksi ${esc(shortDate(source.date))}`:'Aloita tämän tyypin ensimmäinen treeni'} <span aria-hidden="true">→</span></div>`;
+  }
+  function updateNextWorkoutCard() {
+    const card=document.getElementById('next-workout-card');if(!card)return;
+    card.innerHTML=nextWorkoutContent();card.setAttribute('aria-label',`${pendingWorkout()?'Jatka keskeneräistä treeniä':'Aloita seuraava treeni'}: ${pendingWorkout()?.category||nextCategory()}`);
   }
   function garminWindow() {
     const value=state.settings?.garmin;
@@ -384,12 +472,62 @@
   }
   function latest(items) { return [...items].sort((a,b) => b.date.localeCompare(a.date))[0]; }
   function sorted(items) { return [...items].sort((a,b) => b.date.localeCompare(a.date)); }
-  function isCategory(value) { return CATEGORIES.includes(value); }
+  function isCategory(value) { return typeof value==='string' && value.trim().length>0 && value.length<=60 && !/[\u0000-\u001f\u007f]/.test(value); }
+  function cleanCategory(value) { return value.trim().replace(/\s+/g,' '); }
+  function readWorkoutProgram(value) {
+    if(!value || typeof value!=='object' || Array.isArray(value))return null;
+    if(WORKOUT_PROGRAMS.some(program=>program.type===value.type))return value.categories===undefined?{type:value.type}:null;
+    if(value.type!=='custom' || !Array.isArray(value.categories) || value.categories.length<1 || value.categories.length>20)return null;
+    if(value.categories.some(category=>!isCategory(category) || cleanCategory(category)!==category) || new Set(value.categories.map(normalizeName)).size!==value.categories.length)return null;
+    return {type:'custom',categories:[...value.categories]};
+  }
+  function workoutProgram() { return readWorkoutProgram(state.settings?.workoutProgram)||{type:'front-back'}; }
+  function programCategories() {
+    const program=workoutProgram();
+    return program.type==='custom'?[...program.categories]:[...WORKOUT_PROGRAMS.find(item=>item.type===program.type).categories];
+  }
+  function programLabel() {
+    const program=workoutProgram();
+    return program.type==='custom'?'Omavalintainen':WORKOUT_PROGRAMS.find(item=>item.type===program.type).label;
+  }
+  function categoriesWithHistory() {
+    return [...new Set([...programCategories(),...state.workouts.map(row=>row.category).filter(isCategory)])];
+  }
+  function workoutCategoryOptions() {
+    const categories=editingId?categoriesWithHistory():programCategories();
+    if(!editingId && workoutDraftId && state.workoutPending?.id===workoutDraftId && isCategory(workoutDraft?.category))categories.push(workoutDraft.category);
+    return [...new Set(categories)];
+  }
+  function updateProgramFields() {
+    const type=document.getElementById('workout-program-type')?.value;
+    const custom=document.getElementById('workout-program-custom'),order=document.getElementById('workout-program-order');
+    if(!custom || !order)return;
+    custom.hidden=type!=='custom';
+    const categories=type==='custom'?document.getElementById('workout-program-categories').value.split(/\r?\n/).map(cleanCategory).filter(Boolean):WORKOUT_PROGRAMS.find(program=>program.type===type)?.categories||[];
+    order.textContent=categories.length?`Treenien järjestys: ${categories.join(' → ')}${categories.length>1?` → ${categories[0]}`:''}`:'Kirjoita kategoriat haluamaasi järjestykseen.';
+  }
+  function saveWorkoutProgram(form) {
+    const data=new FormData(form),type=String(data.get('programType')||''),error=document.getElementById('workout-program-error');
+    const candidate=type==='custom'?{type,categories:String(data.get('categories')||'').split(/\r?\n/).map(cleanCategory).filter(Boolean)}:{type};
+    const program=readWorkoutProgram(candidate);
+    if(!program){error.textContent=type==='custom'?'Anna 1–20 eri kategoriaa, yksi riville. Nimi voi olla enintään 60 merkkiä. Sama nimi eri kirjainkoossa lasketaan samaksi kategoriaksi.':'Valitse treeniohjelma listasta.';return;}
+    const nextState={...state,settings:{...state.settings,workoutProgram:program}};
+    if(!persist(nextState)){error.textContent='Treeniohjelmaa ei tallennettu. Aiempi ohjelma ja tiedot säilyvät.';return;}
+    state=nextState;error.textContent='';
+    document.getElementById('workout-program-current').textContent=programLabel();
+    document.getElementById('workout-program-count').textContent=countText(programCategories().length,'treenityyppi','treenityyppiä');
+    updateProgramFields();document.getElementById('workout-program-panel').open=false;
+    toast('Treeniohjelma tallennettu');
+  }
+  function workoutProgramSettings() {
+    const program=workoutProgram(),categories=programCategories();
+    return `<details id="workout-program-panel" class="panel workout-program-panel"><summary><span class="program-icon" aria-hidden="true">${svg('workouts')}</span><span class="program-summary"><strong>Treeniohjelma</strong><span id="workout-program-current">${esc(programLabel())}</span></span><span class="program-summary-end"><span id="workout-program-count">${countText(categories.length,'treenityyppi','treenityyppiä')}</span><span class="program-change">Muuta <span aria-hidden="true">⌄</span></span></span></summary><div class="program-editor"><form id="workout-program-form"><div class="field"><label for="workout-program-type">Valitse treeniohjelma</label><select id="workout-program-type" name="programType">${[...WORKOUT_PROGRAMS,{type:'custom',label:'Omavalintainen'}].map(item=>`<option value="${item.type}" ${program.type===item.type?'selected':''}>${item.label}</option>`).join('')}</select></div><div id="workout-program-custom" ${program.type==='custom'?'':'hidden'}><div class="field program-custom-field"><label for="workout-program-categories">Omat kategoriat</label><textarea id="workout-program-categories" name="categories" rows="5" maxlength="1220" placeholder="Push&#10;Pull&#10;Legs&#10;Fullbody" aria-describedby="workout-program-help">${esc(categories.join('\n'))}</textarea></div><p id="workout-program-help" class="form-note">Yksi kategoria riville, enintään 20. Voit yhdistää ohjelmia ja järjestää kategoriat haluamallasi tavalla.</p></div><p id="workout-program-order" class="program-order" aria-live="polite">Treenien järjestys: ${esc([...categories,...(categories.length>1?[categories[0]]:[])].join(' → '))}</p><p class="form-note">Seuraavaa treenityyppiä ehdotetaan tässä järjestyksessä viimeksi tallennetun treenin jälkeen. Vanhojen treenien kategoriat ja liikkeet säilyvät.</p><div id="workout-program-error" class="form-error" role="alert"></div><button type="submit" class="button secondary">Tallenna treeniohjelma</button></form></div></details>`;
+  }
   function savedTime(row) { return Date.parse(row.savedAt) || 0; }
   function lastSavedWorkout() {
     return state.workouts.reduce((last, row) => !last || savedTime(row) >= savedTime(last) ? row : last, null);
   }
-  function nextCategory() { return lastSavedWorkout()?.category === 'Etukroppa' ? 'Takakroppa' : 'Etukroppa'; }
+  function nextCategory() { const categories=programCategories();return categories[(categories.indexOf(lastSavedWorkout()?.category)+1)%categories.length]; }
   function recentWorkouts() {
     return workoutHistory().recent;
   }
@@ -397,11 +535,12 @@
     if (historyCache?.workouts===state.workouts && historyCache.editingId===editingId) return historyCache;
     const indexed=state.workouts.map((row,index)=>({row,index}));
     const recent=[...indexed].sort((a,b)=>b.row.date.localeCompare(a.row.date)||savedTime(b.row)-savedTime(a.row)||b.index-a.index).map(item=>item.row);
-    const units=new Map(), previous=new Map(), suggestions=new Map(CATEGORIES.map(category=>[category,new Map()]));
+    const units=new Map(), previous=new Map(), suggestions=new Map();
     for (const {row} of [...indexed].sort((a,b)=>savedTime(b.row)-savedTime(a.row)||b.index-a.index)) {
       for (const ex of row.exercises) {const key=normalizeName(ex.name);if(!units.has(key))units.set(key,exerciseUnit(ex));}
     }
     for (const row of recent) {
+      if(isCategory(row.category) && !suggestions.has(row.category))suggestions.set(row.category,new Map());
       for (const ex of row.exercises) {
         const key=normalizeName(ex.name), group=suggestions.get(row.category);
         if (row.id!==editingId && !previous.has(key)) previous.set(key,{workout:row,exercise:ex});
@@ -423,15 +562,15 @@
   function previousExercise(name) {
     return workoutHistory().previous.get(normalizeName(name))||null;
   }
-  function previousRepsText(name, index) {
+  function previousRepsText(name, index, unit) {
     const previous=previousExercise(name), set=previous?.exercise.sets[index];
-    return set ? `Viimeksi ${shortDate(previous.workout.date)}: ${set.reps} toistoa` : 'Ei aiempaa vastaavaa sarjaa';
+    return set ? `Viimeksi ${weightText(fromKg(Number(set.weight),unit||exerciseUnit(previous.exercise)),unit||exerciseUnit(previous.exercise))} × ${set.reps} · ${shortDate(previous.workout.date)}` : 'Ei aiempaa vastaavaa sarjaa';
   }
   function updatePreviousReps(index) {
     const ex=workoutDraft.exercises[index];
     ex.sets.forEach((set,si)=>{
       const hint=document.getElementById(`previous-reps-${index}-${si}`);
-      const text=`Sarja ${si+1} · ${previousRepsText(ex.name,si)}`;
+      const text=`Sarja ${si+1} · ${previousRepsText(ex.name,si,exerciseUnit(ex))}`;
       if (hint && hint.textContent!==text) hint.textContent=text;
     });
   }
@@ -443,10 +582,10 @@
   }
   function categoryExerciseNames(category) {
     const ungrouped=new Set(UNGROUPED_EXERCISES.map(normalizeName));
-    const keys=new Set(category==='uncategorized' ? ungrouped : []);
+    const keys=new Set(category===null ? ungrouped : []);
     for (const workout of state.workouts) {
-      if (category==='uncategorized' ? isCategory(workout.category) : workout.category!==category) continue;
-      for (const ex of workout.exercises) if (category==='uncategorized' || !ungrouped.has(normalizeName(ex.name))) keys.add(normalizeName(ex.name));
+      if (category===null ? isCategory(workout.category) : workout.category!==category) continue;
+      for (const ex of workout.exercises) if (category===null || !ungrouped.has(normalizeName(ex.name))) keys.add(normalizeName(ex.name));
     }
     return exerciseNames().filter(name=>keys.has(normalizeName(name)));
   }
@@ -573,6 +712,18 @@
       if(focused!==null)document.getElementById(`${entry.id}-point-${focused}`)?.focus({preventScroll:true});
     }
   }
+  function cancelExpandedChartLayout() {
+    if(chartLayoutFrame!==null)cancelAnimationFrame(chartLayoutFrame);
+    clearTimeout(chartLayoutTimer);chartLayoutFrame=null;chartLayoutTimer=null;
+  }
+  function settleExpandedChartLayout() {
+    if(!dialog.open || !dialog.classList.contains('chart-modal'))return;
+    cancelExpandedChartLayout();
+    const update=()=>{if(!dialog.open || !dialog.classList.contains('chart-modal'))return;dialog.scrollTop=0;dialogContent.scrollTop=0;sizeCharts();};
+    chartLayoutFrame=requestAnimationFrame(()=>{chartLayoutFrame=null;update();});
+    // Mobile orientation metrics can arrive in more than one layout pass.
+    chartLayoutTimer=setTimeout(()=>{chartLayoutTimer=null;update();},150);
+  }
   function watchCharts() {
     chartResizeObserver?.disconnect();sizeCharts();
     if(typeof ResizeObserver==='function') {
@@ -593,7 +744,8 @@
     const entry=charts.get(id);if(!entry || dialog.open)return;
     const title=entry.metric==='sleep'?'Yöajan kehitys':entry.metric==='weight'?'Painon kehitys':selectedExercise||'Liikkeen kehitys';
     dialog.classList.add('chart-modal');
-    showDialog(`<div class="dialog-inner chart-expanded">${dialogHead(title,'Koko aikaväli näkyy kerralla. Pisteiden tiedot ovat käytössä 30 pv -näkymässä.')}${chart(entry.points,entry.metric,entry.color,false,entry.period,entry.unit,true)}</div>`);
+    showDialog(`<div class="chart-dialog-head">${dialogHead(title,'Koko aikaväli näkyy kerralla. Pisteiden tiedot ovat käytössä 30 pv -näkymässä.')}</div><div class="dialog-inner chart-expanded">${chart(entry.points,entry.metric,entry.color,false,entry.period,entry.unit,true)}</div>`);
+    settleExpandedChartLayout();
   }
   function sparkline(points) {
     const data = points.slice(-12); if (!data.length) return '';
@@ -616,14 +768,13 @@
   }
 
   function renderHome() {
-    const w=latest(state.weight), s=latest(state.sleep), weekCutoff=dateObj(today()); weekCutoff.setDate(weekCutoff.getDate()-6);
-    const weekly=state.workouts.filter(row=>dateObj(row.date)>=weekCutoff).length;
+    const w=latest(state.weight), s=latest(state.sleep);
     const recent=[...state.workouts.map(row=>({...row,kind:'workouts'})),...state.sleep.map(row=>({...row,kind:'sleep'})),...state.weight.map(row=>({...row,kind:'weight'}))].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,4);
     return `<section class="hero"><div class="hero-content"><p class="eyebrow">OMA HYVINVOINTIPÄIVÄKIRJA</p><h1>Näe, miten arkesi<br>etenee.</h1><p>Treeni, rauhallinen yöaika ja kehonpaino samassa näkymässä. Jokainen merkintä rakentaa kuvaa kehityksestäsi.</p></div><div class="hero-graphic" aria-hidden="true"><svg viewBox="0 0 265 145" fill="none"><path d="M4 116 51 96 92 106 139 65 177 77 225 25 261 35" stroke="#a9d493" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 116 51 96 92 106 139 65 177 77 225 25 261 35" stroke="#a9d493" stroke-width="20" stroke-opacity=".07" stroke-linecap="round"/><circle cx="225" cy="25" r="8" fill="#d7edaa" stroke="#285849" stroke-width="4"/></svg></div></section>
     <div class="summary-grid">
-      <div class="metric-card"><div class="metric-top">Treenit / 7 pv <span class="metric-icon green">${svg('workouts')}</span></div><div class="metric-value">${weekly} <small>krt</small></div><div class="metric-note">Viimeiset seitsemän päivää</div></div>
-      <div class="metric-card"><div class="metric-top">Viimeisin yöaika <span class="metric-icon blue">${svg('sleep')}</span></div><div class="metric-value">${s?esc(durationText(s.duration)):'—'}</div><div class="metric-note">${s?esc(shortDate(s.date)):'Ei vielä merkintää'}</div></div>
-      <div class="metric-card"><div class="metric-top">Viimeisin paino <span class="metric-icon rose">${svg('weight')}</span></div><div class="metric-value">${w?esc(fmt.format(w.value)):'—'} ${w?'<small>kg</small>':''}</div><div class="metric-note">${w?esc(shortDate(w.date)):'Ei vielä merkintää'}</div></div>
+      <button id="next-workout-card" type="button" class="metric-card next-workout-card" data-action="next-workout" aria-label="${esc(pendingWorkout()?'Jatka keskeneräistä treeniä':'Aloita seuraava treeni')}: ${esc(pendingWorkout()?.category||nextCategory())}">${nextWorkoutContent()}</button>
+      <button type="button" class="metric-card summary-chart-card" data-action="view-summary-chart" data-kind="sleep" aria-label="Näytä viimeisen 30 päivän yöaikakäyrä"><div class="metric-top">Viimeisin yöaika <span class="metric-icon blue">${svg('sleep')}</span></div><div class="metric-value">${s?esc(durationText(s.duration)):'—'}</div><div class="metric-note">${s?esc(shortDate(s.date)):'Ei vielä merkintää'}</div></button>
+      <button type="button" class="metric-card summary-chart-card" data-action="view-summary-chart" data-kind="weight" aria-label="Näytä viimeisen 30 päivän painokäyrä"><div class="metric-top">Viimeisin paino <span class="metric-icon rose">${svg('weight')}</span></div><div class="metric-value">${w?esc(fmt.format(w.value)):'—'} ${w?'<small>kg</small>':''}</div><div class="metric-note">${w?esc(shortDate(w.date)):'Ei vielä merkintää'}</div></button>
     </div>
     <div class="section-heading"><h2>Pikakirjaus</h2></div><div class="quick-grid">
       ${[['workouts','Treeni','Sarjat ja toistot','new-workout'],['sleep','Yöaika','Illasta aamuun','new-sleep'],['weight','Paino','Päivän mittaus','new-weight']].map(([ic,title,sub,action])=>`<button type="button" class="quick-action" data-action="${action}"><span class="round-icon">${svg(ic)}</span><span><strong>${title}</strong><small>${sub}</small></span><span class="quick-arrow">→</span></button>`).join('')}
@@ -634,9 +785,9 @@
   function renderWorkouts() {
     return `${header('Treenipäiväkirja','VOIMAA JA TOISTOJA','Kirjaa jokainen liike sarjoineen. Käyrä syntyy automaattisesti, kun liike toistuu.',addButton('new-workout','Kirjaa treeni'))}
     <div class="section-heading"><div><h2>Omat liikkeesi</h2><p>Avaa kategoria ja valitse liike nähdäksesi sen käyrän</p></div></div>
-    <div class="exercise-categories">${[...CATEGORIES,'uncategorized'].map(category=>{
+    <div class="exercise-categories">${[...categoriesWithHistory(),null].map(category=>{
       const names=categoryExerciseNames(category);
-      return `<details class="exercise-category" data-category="${category}"><summary><span>${category==='uncategorized'?'Ilman kategoriaa':category}</span><span class="category-count">${countText(names.length,'liike','liikettä')}</span></summary>${names.length?`<div class="exercise-grid">${names.map(exerciseCard).join('')}</div>`:'<p class="form-note">Ei vielä liikkeitä tässä kategoriassa.</p>'}</details>`;
+      return `<details class="exercise-category" data-category="${esc(category??'uncategorized')}" data-uncategorized="${category===null}"><summary><span>${category===null?'Ilman kategoriaa':esc(category)}${category!==null && !programCategories().includes(category)?'<small class="category-archive">Aiempi ohjelma</small>':''}</span><span class="category-count">${countText(names.length,'liike','liikettä')}</span></summary>${names.length?`<div class="exercise-grid">${names.map(exerciseCard).join('')}</div>`:'<p class="form-note">Ei vielä liikkeitä tässä kategoriassa.</p>'}</details>`;
     }).join('')}</div>
     <div class="section-heading"><h2>Treenihistoria</h2></div>
     ${state.workouts.length?`<div class="entry-list">${sorted(state.workouts).map(row=>`<article class="entry-card"><div class="entry-main"><h3 class="entry-title">${esc(fullDate(row.date))}${isCategory(row.category)?` <span class="category-badge">${esc(row.category)}</span>`:''}</h3><div class="entry-meta">${row.exercises.length} liikettä · ${row.exercises.reduce((n,ex)=>n+ex.sets.length,0)} sarjaa</div><div class="entry-summary">${row.exercises.map(ex=>`<span><strong>${esc(ex.name)}</strong> · ${ex.sets.map(set=>`${esc(weightText(fromKg(set.weight,exerciseUnit(ex)),exerciseUnit(ex)))} × ${esc(set.reps)}`).join(', ')}</span>`).join('')}</div></div>${entryActions('workout',row)}</article>`).join('')}</div>`:empty('workouts','Ei vielä treenejä','Ensimmäinen kirjaus aloittaa treenihistoriasi.','new-workout','Kirjaa treeni')}`;
@@ -697,7 +848,7 @@
   }
   function renderSettings() {
     return `${header('Asetukset','OMAT TIEDOT','Pidä kirjausdata omassa hallinnassasi.')}
-    <div class="settings-stack">${document.body.dataset.preview==='true'?'<section class="panel preview-note"><h2>Oma esikatselu</h2><p>Tämä on testiversio. Sen merkinnät tallentuvat tähän osoitteeseen erillään tavallisesta Kuntokäyrästä. Voit tuoda kokeiluun oman varmuuskopiosi.</p></section>':''}<section class="panel"><h2>Lisää puhelimen aloitusnäyttöön</h2><p>Avaa tämä sivu puhelimellasi. Asennettuna se näyttää ja toimii sovelluksen tavoin.</p><ol class="install-steps"><li>iPhone: avaa Safari, napauta Jaa-painiketta ja valitse <strong>Lisää Koti-valikkoon</strong>.</li><li>Android: avaa Chrome-valikko ja valitse <strong>Asenna sovellus</strong> tai <strong>Lisää aloitusnäyttöön</strong>.</li></ol>${deferredInstall?'<div class="settings-actions" style="margin-top:17px"><button type="button" class="button primary" data-action="install">Asenna sovellus</button></div>':''}</section>
+    <div class="settings-stack">${workoutProgramSettings()}<section class="panel"><h2>Lisää puhelimen aloitusnäyttöön</h2><p>Avaa tämä sivu puhelimellasi. Asennettuna se näyttää ja toimii sovelluksen tavoin.</p><ol class="install-steps"><li>iPhone: avaa Safari, napauta Jaa-painiketta ja valitse <strong>Lisää Koti-valikkoon</strong>.</li><li>Android: avaa Chrome-valikko ja valitse <strong>Asenna sovellus</strong> tai <strong>Lisää aloitusnäyttöön</strong>.</li></ol>${deferredInstall?'<div class="settings-actions" style="margin-top:17px"><button type="button" class="button primary" data-action="install">Asenna sovellus</button></div>':''}</section>
     ${garminSettings()}
     <section class="panel"><h2>Sarjataukon pituus</h2><p>Valitse 15 sekuntia–30 minuuttia. Uusi pituus koskee seuraavaa taukoa ja Uudelleen-painiketta. Käynnissä oleva tauko jatkuu nykyiseen loppuhetkeensä.</p><form id="rest-settings-form"><div class="field-row"><div class="field"><label for="rest-minutes">Minuutit</label><input id="rest-minutes" name="minutes" type="number" inputmode="numeric" min="0" max="30" step="1" value="${Math.floor(restSeconds()/60)}" required></div><div class="field"><label for="rest-seconds">Sekunnit</label><input id="rest-seconds" name="seconds" type="number" inputmode="numeric" min="0" max="59" step="1" value="${restSeconds()%60}" required></div></div><div id="rest-settings-error" class="form-error" role="alert"></div><button class="button secondary" type="submit">Tallenna taukoaika</button></form></section>
     <section class="panel"><h2>Varmuuskopio</h2><p>Merkinnät tallentuvat tämän laitteen selaimeen. Ne eivät synkronoidu automaattisesti toiseen puhelimeen tai tietokoneeseen. Vie JSON-varmuuskopio talteen ja tuo se tarvittaessa takaisin.</p><div class="settings-actions"><button type="button" class="button secondary" data-action="export">${svg('download')} Vie tiedot</button><button type="button" class="button ghost" data-action="import">${svg('upload')} Tuo varmuuskopio</button></div></section>
@@ -729,11 +880,72 @@
     watchCharts();
   }
   function dialogHead(title,sub) { return `<div class="dialog-head"><div><h2 id="dialog-title">${title}</h2><p>${sub}</p></div><button type="button" class="dialog-close" data-action="close" aria-label="Sulje">×</button></div>`; }
-  function openWorkout(row) {
+  function workoutOrderControls() {
+    if(workoutDraft.exercises.length<2)return '';
+    return `<details id="workout-order" class="workout-order" ${workoutOrderOpen?'open':''}><summary>Järjestä liikkeet <span>${workoutDraft.exercises.length}</span></summary><p id="workout-order-help" class="form-note">Vedä kahvasta ylös tai alas. Voit myös käyttää nuolia.</p><div id="workout-order-list" class="workout-order-list">${workoutDraft.exercises.map((ex,index)=>`<div class="workout-order-row" data-order-index="${index}"><button id="workout-drag-${index}" class="workout-drag-handle" type="button" data-action="drag-exercise" data-ex="${index}" aria-label="Siirrä ${esc(ex.name||`liike ${index+1}`)} vetämällä tai nuolinäppäimillä" aria-describedby="workout-order-help">⠿</button><span>${index+1}. ${esc(ex.name||'Nimetön liike')}</span><button class="workout-order-arrow" type="button" data-action="move-exercise-up" data-ex="${index}" ${index===0?'disabled':''} aria-label="Siirrä ${esc(ex.name||`liike ${index+1}`)} ylemmäs">↑</button><button class="workout-order-arrow" type="button" data-action="move-exercise-down" data-ex="${index}" ${index===workoutDraft.exercises.length-1?'disabled':''} aria-label="Siirrä ${esc(ex.name||`liike ${index+1}`)} alemmas">↓</button></div>`).join('')}</div><p id="workout-order-status" class="form-note" role="status"></p></details>`;
+  }
+  function moveWorkoutExercise(from,to) {
+    if(!workoutDraft || !Number.isInteger(from) || !Number.isInteger(to) || from===to || from<0 || to<0 || from>=workoutDraft.exercises.length || to>=workoutDraft.exercises.length)return;
+    const [exercise]=workoutDraft.exercises.splice(from,1);workoutDraft.exercises.splice(to,0,exercise);
+    scheduleWorkoutDraftSave();renderWorkoutEditor({preserveScroll:true,focus:`#workout-drag-${to}`});
+    const status=document.getElementById('workout-order-status');if(status)status.textContent=`${exercise.name||'Liike'} siirretty kohtaan ${to+1}.`;
+  }
+  function updateExerciseDrag() {
+    const drag=exerciseDrag;if(!drag)return;
+    const rows=[...drag.list.querySelectorAll('[data-order-index]')];
+    let closest=Infinity,target=drag.from;
+    for(const row of rows){const rect=row.getBoundingClientRect(),distance=Math.abs(drag.y-(rect.top+rect.height/2));if(distance<closest){closest=distance;target=Number(row.dataset.orderIndex);}}
+    drag.to=target;
+    for(const row of rows){row.classList.toggle('order-drag-source',Number(row.dataset.orderIndex)===drag.from);row.classList.toggle('order-drag-target',Number(row.dataset.orderIndex)===target && target!==drag.from);}
+    const status=document.getElementById('workout-order-status');if(status)status.textContent=`Siirrä kohtaan ${target+1}.`;
+  }
+  function scrollExerciseDrag() {
+    const drag=exerciseDrag;if(!drag || !drag.moved)return;
+    const rect=drag.list.getBoundingClientRect(),before=drag.list.scrollTop;
+    const direction=drag.y<rect.top+32?-1:drag.y>rect.bottom-32?1:0;
+    if(direction)drag.list.scrollTop=Math.max(0,Math.min(drag.list.scrollHeight-drag.list.clientHeight,before+direction*9));
+    if(drag.list.scrollTop!==before)updateExerciseDrag();
+    drag.frame=requestAnimationFrame(scrollExerciseDrag);
+  }
+  function beginExerciseDrag(event) {
+    const handle=event.target.closest?.('[data-action="drag-exercise"]');
+    if(!handle || !workoutDraft || event.isPrimary===false || (event.pointerType==='mouse' && event.button!==0) || !Number.isFinite(event.clientY))return;
+    const list=document.getElementById('workout-order-list');if(!list)return;
+    finishExerciseDrag(false);event.preventDefault();handle.focus({preventScroll:true});
+    exerciseDrag={pointerId:event.pointerId,from:Number(handle.dataset.ex),to:Number(handle.dataset.ex),startY:event.clientY,y:event.clientY,handle,list,moved:false,frame:null};
+    try{handle.setPointerCapture?.(event.pointerId);}catch (_){}
+  }
+  function continueExerciseDrag(event) {
+    const drag=exerciseDrag;if(!drag || drag.pointerId!==event.pointerId)return;
+    event.preventDefault();drag.y=event.clientY;
+    if(!drag.moved && Math.abs(drag.y-drag.startY)>6){drag.moved=true;drag.frame=requestAnimationFrame(scrollExerciseDrag);}
+    if(drag.moved)updateExerciseDrag();
+  }
+  function finishExerciseDrag(commit,event) {
+    const drag=exerciseDrag;if(!drag || (event && drag.pointerId!==event.pointerId))return;
+    exerciseDrag=null;if(drag.frame!==null)cancelAnimationFrame(drag.frame);
+    try{drag.handle.releasePointerCapture?.(drag.pointerId);}catch (_){}
+    for(const row of drag.list.querySelectorAll('[data-order-index]'))row.classList.remove('order-drag-source','order-drag-target');
+    if(commit && drag.moved){event?.preventDefault();moveWorkoutExercise(drag.from,drag.to);}
+  }
+  function openWorkout(row,{suggested=false}={}) {
+    if(!saveWorkoutDraft())return;
+    cancelWorkoutDraftSave();finishExerciseDrag(false);
     cancelPendingSetTimers();
     sleepReview=null;
     editingId=row?.id||null;
-    workoutDraft=row?JSON.parse(JSON.stringify(row)):{date:today(),category:nextCategory(),exercises:[{name:'',sets:[{weight:'',reps:''}]}]};
+    const pending=row?null:pendingWorkout();
+    workoutDraftId=row?null:pending?.id||id();
+    if(pending){
+      workoutDraft={date:pending.date,...(pending.category!==undefined?{category:pending.category}:{}),exercises:pending.exercises.map(ex=>({name:ex.name,unit:ex.unit,_unitEdited:ex.unitEdited,sets:ex.sets.map(set=>({weight:set.weight,reps:set.reps,_weightEdited:set.weightEdited,_weightSuggested:set.weightSuggested,_restStarted:set.completed,...(set.canonicalWeight!==undefined?{_canonicalInput:set.weight,_canonicalWeight:set.canonicalWeight}:{})}))}))};
+    } else {
+      workoutDraft=row?JSON.parse(JSON.stringify(row)):{date:today(),category:nextCategory(),exercises:[{name:'',sets:[{weight:'',reps:''}]}]};
+      const source=!row && suggested?nextWorkoutSource(workoutDraft.category):null;
+      if(source?.exercises.length)workoutDraft.exercises=source.exercises.map(previous=>{
+        const unit=preferredExerciseUnit(previous.name);
+        return {name:previous.name,unit,sets:previous.sets.map(previousSet=>{const set={weight:'',reps:'',_weightSuggested:true};displayDraftWeight(set,Number(previousSet.weight),unit);return set;})};
+      });
+    }
     // Existing and manually edited values are never replaced by a name suggestion.
     if (row) for (const ex of workoutDraft.exercises) {
       ex.unit=exerciseUnit(ex);
@@ -744,7 +956,8 @@
         set._restStarted=true;
       }
     }
-    renderWorkoutEditor({preserveScroll:false});
+    renderWorkoutEditor({preserveScroll:false,resetOrder:true});
+    if(suggested && !pending && !row)saveWorkoutDraft();
   }
   function updateExerciseName(index, name) {
     const ex=workoutDraft.exercises[index];
@@ -774,6 +987,7 @@
     const select=document.getElementById(`exercise-unit-${index}`), label=document.getElementById(`weight-label-${index}`);
     if (select) select.value=unit;
     if (label) label.textContent=`Paino (${unit})`;
+    updatePreviousReps(index);
   }
   function chooseExercise(name) {
     const existing=workoutDraft.exercises.findIndex(ex=>normalizeName(ex.name)===normalizeName(name));
@@ -781,28 +995,35 @@
     let index=workoutDraft.exercises.findIndex(ex=>!ex.name.trim());
     if (index<0) { index=workoutDraft.exercises.length; workoutDraft.exercises.push({name:'',sets:[{weight:'',reps:''}]}); }
     updateExerciseName(index,name);
+    scheduleWorkoutDraftSave();
     renderWorkoutEditor({preserveScroll:true,focus:`[data-draft="weight"][data-ex="${index}"][data-set="0"]`,reveal:true});
   }
   function renderWorkoutEditor(options = {preserveScroll:true}) {
     const names=suggestedExercises(workoutDraft.category);
+    const orderScroll=document.getElementById('workout-order-list')?.scrollTop||0;
+    if(options.resetOrder)workoutOrderOpen=false;
+    else if(document.getElementById('workout-order'))workoutOrderOpen=document.getElementById('workout-order').open;
     showDialog(`<div id="dialog-rest-timer-host"></div><div class="dialog-inner">${dialogHead(editingId?'Muokkaa treeniä':'Kirjaa treeni','Lisää liikkeet sekä jokaisen sarjan paino ja toistot.')}
       <div class="field-row"><div class="field"><label for="workout-date">Treenipäivä</label><input id="workout-date" data-draft="date" type="date" value="${esc(workoutDraft.date)}" required></div>
-      <div class="field"><label for="workout-category">Treenikategoria</label><select id="workout-category" data-draft="category">${!isCategory(workoutDraft.category)?'<option value="">Ei kategoriaa (vanha merkintä)</option>':''}${CATEGORIES.map(category=>`<option value="${category}" ${workoutDraft.category===category?'selected':''}>${category}</option>`).join('')}</select></div></div>
+      <div class="field"><label for="workout-category">Treenikategoria</label><select id="workout-category" data-draft="category">${!isCategory(workoutDraft.category)?'<option value="">Ei kategoriaa (vanha merkintä)</option>':''}${workoutCategoryOptions().map(category=>`<option value="${esc(category)}" ${workoutDraft.category===category?'selected':''}>${esc(category)}</option>`).join('')}</select></div></div>
       <section class="exercise-suggestions" aria-label="Kategorian aiemmat liikkeet"><p class="field-label">${isCategory(workoutDraft.category)?`${esc(workoutDraft.category)}: aiemmat liikkeet`:'Valitse kategoria nähdäksesi aiemmat liikkeet'}</p>${names.length?`<div class="suggestion-list">${names.map(name=>`<button type="button" class="suggestion-button" data-action="choose-exercise" data-name="${esc(name)}">${esc(name)}</button>`).join('')}</div><p class="form-note">Viimeisimmän treenin järjestyksessä. Valitse liike tai kirjoita oma nimi.</p>`:isCategory(workoutDraft.category)?'<p class="form-note">Tässä kategoriassa ei ole vielä liikkeitä. Kirjoita liikkeen nimi alle.</p>':''}</section>
       <datalist id="exercise-suggestions">${names.map(name=>`<option value="${esc(name)}"></option>`).join('')}</datalist>
+      ${!editingId?`<div class="workout-draft-bar"><span id="workout-draft-status" role="status">${state.workoutPending?.id===workoutDraftId?'Keskeneräinen treeni tallessa':'Luonnos tallentuu automaattisesti'}</span></div>`:''}
+      ${workoutOrderControls()}
       ${workoutDraft.exercises.map((ex,ei)=>`<div class="form-section"><div class="form-section-head"><strong>Liike ${ei+1}</strong><button class="mini-remove" type="button" data-action="remove-exercise" data-ex="${ei}">Poista liike</button></div>
       <div class="field" style="margin-bottom:15px"><label for="exercise-${ei}">Liike</label><input id="exercise-${ei}" name="exercise-title-${ei}" data-draft="name" data-ex="${ei}" list="exercise-suggestions" type="text" maxlength="80" placeholder="Esim. penkkipunnerrus" value="${esc(ex.name)}" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="Liike ${ei+1}, liikkeen nimi"></div>
       <div class="field exercise-unit"><label for="exercise-unit-${ei}">Painoyksikkö</label><select id="exercise-unit-${ei}" data-draft="unit" data-ex="${ei}"><option value="kg" ${exerciseUnit(ex)==='kg'?'selected':''}>kg – kilogrammat</option><option value="lbs" ${exerciseUnit(ex)==='lbs'?'selected':''}>lbs – paunat</option></select></div>
-      <div class="set-head"><span id="weight-label-${ei}">Paino (${exerciseUnit(ex)})</span><span>Toistot</span><span></span></div>${ex.sets.map((set,si)=>`<div class="set-row"><input data-draft="weight" data-ex="${ei}" data-set="${si}" type="text" inputmode="decimal" value="${esc(set.weight)}" aria-label="Liike ${ei+1}, sarja ${si+1}, paino ${exerciseUnit(ex)}" placeholder="0"><input data-draft="reps" data-ex="${ei}" data-set="${si}" type="number" inputmode="numeric" min="1" max="1000" step="1" value="${esc(set.reps)}" aria-label="Liike ${ei+1}, sarja ${si+1}, toistot" aria-describedby="previous-reps-${ei}-${si}" placeholder="8"><button class="set-remove" type="button" data-action="remove-set" data-ex="${ei}" data-set="${si}" aria-label="Poista sarja ${si+1}">×</button><span id="previous-reps-${ei}-${si}" class="previous-set">Sarja ${si+1} · ${esc(previousRepsText(ex.name,si))}</span></div>`).join('')}
+      <div class="set-head"><span id="weight-label-${ei}">Paino (${exerciseUnit(ex)})</span><span>Toistot</span><span></span></div>${ex.sets.map((set,si)=>`<div class="set-row"><input data-draft="weight" data-ex="${ei}" data-set="${si}" type="text" inputmode="decimal" value="${esc(set.weight)}" aria-label="Liike ${ei+1}, sarja ${si+1}, paino ${exerciseUnit(ex)}" placeholder="0"><input data-draft="reps" data-ex="${ei}" data-set="${si}" type="number" inputmode="numeric" min="1" max="1000" step="1" value="${esc(set.reps)}" aria-label="Liike ${ei+1}, sarja ${si+1}, toistot" aria-describedby="previous-reps-${ei}-${si}" placeholder="8"><button class="set-remove" type="button" data-action="remove-set" data-ex="${ei}" data-set="${si}" aria-label="Poista sarja ${si+1}">×</button><span id="previous-reps-${ei}-${si}" class="previous-set">Sarja ${si+1} · ${esc(previousRepsText(ex.name,si,exerciseUnit(ex)))}</span></div>`).join('')}
       <button type="button" class="inline-add" data-action="add-set" data-ex="${ei}">+ Lisää sarja</button></div>`).join('')}
       <button type="button" class="button secondary" data-action="add-exercise">${svg('plus')} Lisää liike</button><p class="form-note">Ensimmäiseen sarjaan ehdotetaan liikkeen viimeisintä aloituspainoa. Uusi sarja kopioi nykyisen ensimmäisen sarjan painon. Yksikön vaihto muuntaa kaikki liikkeen sarjapainot. Ilman lisäpainoa merkitse 0. Kun paino ja toistot on täytetty, asetuksissa valittu sarjatauko alkaa automaattisesti.</p>
-      <div id="form-error" class="form-error" role="alert"></div><div class="dialog-actions"><button type="button" class="button ghost" data-action="close">Peruuta</button><button type="button" class="button primary" data-action="save-workout">Tallenna treeni</button></div></div>`,options);
+      <div id="form-error" class="form-error" role="alert"></div><div class="dialog-actions workout-actions"><button type="button" class="button ghost" data-action="close">${editingId?'Peruuta':'Jatka myöhemmin'}</button><button type="button" class="button primary" data-action="save-workout">Tallenna treeni</button><button type="button" class="button danger" data-action="delete-current-workout">Poista treeni</button></div></div>`,options);
+    const orderList=document.getElementById('workout-order-list');if(orderList)orderList.scrollTop=orderScroll;
   }
   function saveWorkout() {
     const error=document.getElementById('form-error');
     const fail=msg=>{error.textContent=msg;return;};
     if (!validDate(workoutDraft.date)) return fail('Valitse kelvollinen päivämäärä.');
-    if (!editingId && !isCategory(workoutDraft.category)) return fail('Valitse treenikategoria.');
+    if (!editingId && !workoutCategoryOptions().includes(workoutDraft.category)) return fail('Valitse treenikategoria.');
     if (!workoutDraft.exercises.length) return fail('Lisää vähintään yksi liike.');
     const cleaned=[];
     for (const ex of workoutDraft.exercises) {
@@ -822,13 +1043,16 @@
     if (isCategory(workoutDraft.category)) entry.category=workoutDraft.category;
     const workouts=editingId?state.workouts.map(row=>row.id===editingId?entry:row):[...state.workouts,entry];
     const nextState={...state,workouts};
+    if(!editingId && nextState.workoutPending?.id===workoutDraftId)delete nextState.workoutPending;
     if (!persist(nextState)) return fail('Treeniä ei tallennettu. Tiedot ovat yhä tässä lomakkeessa.');
     state=nextState;
     // A quick save also finishes any newly completed row whose typing delay is still pending.
     for (const ex of workoutDraft.exercises) for (const set of ex.sets) if (!set._restStarted && validDraftSet(ex,set)) {set._restStarted=true;startRestTimer(ex.name,ex.sets.indexOf(set));}
-    cancelPendingSetTimers();dialog.close(); workoutDraft=null; tab='workouts'; render(); toast('Treeni tallennettu');
+    resetWorkoutEditor();dialog.close();tab='workouts';render();toast('Treeni tallennettu');
   }
   function openSimple(type,row,review=null) {
+    if(!saveWorkoutDraft())return;
+    resetWorkoutEditor();
     cancelPendingSetTimers();
     sleepReview=review;
     editingId=row?.id||null;
@@ -910,17 +1134,20 @@
       output.sleepPending={id:pending.id,startedAt:pending.startedAt};
       if (pending.endedAt!==undefined) output.sleepPending.endedAt=pending.endedAt;
     }
+    if(data.workoutPending!==undefined){const pending=readPendingWorkout(data.workoutPending);if(!pending)throw Error('Keskeneräisen treenin tiedoissa on virhe.');output.workoutPending=pending;}
     if (data.settings!==undefined) {
       if(!data.settings || typeof data.settings!=='object' || Array.isArray(data.settings))throw Error('Asetuksissa on virhe.');
       const settings={};
       if(data.settings.restSeconds!==undefined){if(!validRestSeconds(data.settings.restSeconds))throw Error('Sarjataukon asetuksessa on virhe.');settings.restSeconds=data.settings.restSeconds;}
       if(data.settings.garmin!==undefined){if(!Garmin?.validWindow(data.settings.garmin))throw Error('Garminin aikaväliasetuksessa on virhe.');settings.garmin={start:data.settings.garmin.start,end:data.settings.garmin.end};}
+      if(data.settings.workoutProgram!==undefined){const program=readWorkoutProgram(data.settings.workoutProgram);if(!program)throw Error('Treeniohjelman asetuksessa on virhe.');settings.workoutProgram=program;}
       if(!Object.keys(settings).length)throw Error('Asetuksissa on virhe.');
       output.settings=settings;
     }
     return output;
   }
   function exportBackup() {
+    if(!saveWorkoutDraft())return;
     const payload={app:'Kuntokäyrä',version:1,exportedAt:new Date().toISOString(),data:state};
     const url=URL.createObjectURL(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}));
     const anchor=document.createElement('a');anchor.href=url;anchor.download=`kuntokayra-varmuuskopio-${today()}.json`;document.body.append(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Varmuuskopio ladattu');
@@ -972,29 +1199,37 @@
     if(action==='rest-cancel') {restTimer=null;if(restInterval!==null)clearInterval(restInterval);restInterval=null;renderRestTimer();return;}
     if(action==='rest-restart') {if(restTimer)startRestTimer(restTimer.name,restTimer.setIndex);return;}
     if(action==='new-workout') return openWorkout();
+    if(action==='next-workout')return openWorkout(null,{suggested:true});
+    if(action==='delete-current-workout')return deleteCurrentWorkout();
+    if(action==='drag-exercise')return;
+    if(action==='move-exercise-up' || action==='move-exercise-down')return moveWorkoutExercise(Number(button.dataset.ex),Number(button.dataset.ex)+(action==='move-exercise-up'?-1:1));
     if(action==='new-sleep'||action==='new-weight') return openSimple(action.slice(4));
-    if(action==='close') {cancelPendingSetTimers();return dialog.close();}
+    if(action==='close')return closeEntryDialog();
     if(action==='save-workout') return saveWorkout();
     if(action==='choose-exercise') return chooseExercise(button.dataset.name);
-    if(action==='add-exercise') {const index=workoutDraft.exercises.length;workoutDraft.exercises.push({name:'',sets:[{weight:'',reps:''}]});return renderWorkoutEditor({preserveScroll:true,focus:`#exercise-${index}`,reveal:true});}
-    if(action==='remove-exercise') {workoutDraft.exercises.splice(Number(button.dataset.ex),1);return renderWorkoutEditor();}
+    if(action==='add-exercise') {const index=workoutDraft.exercises.length;workoutDraft.exercises.push({name:'',sets:[{weight:'',reps:''}]});scheduleWorkoutDraftSave();return renderWorkoutEditor({preserveScroll:true,focus:`#exercise-${index}`,reveal:true});}
+    if(action==='remove-exercise') {const ex=workoutDraft.exercises[Number(button.dataset.ex)];for(const set of ex?.sets||[]){clearTimeout(pendingSetTimers.get(set));pendingSetTimers.delete(set);}workoutDraft.exercises.splice(Number(button.dataset.ex),1);scheduleWorkoutDraftSave();return renderWorkoutEditor();}
     if(action==='add-set') {
       const index=Number(button.dataset.ex), ex=workoutDraft.exercises[index];
       const first=ex.sets[0], set={weight:first?.weight??'',reps:''};
       if (first && set.weight!=='' && Number.isFinite(num(set.weight))) displayDraftWeight(set,draftWeightKg(first,exerciseUnit(ex)),exerciseUnit(ex));
       ex.sets.push(set);
+      scheduleWorkoutDraftSave();
       return renderWorkoutEditor({preserveScroll:true,focus:`[data-draft="weight"][data-ex="${index}"][data-set="${ex.sets.length-1}"]`});
     }
-    if(action==='remove-set') {workoutDraft.exercises[Number(button.dataset.ex)].sets.splice(Number(button.dataset.set),1);return renderWorkoutEditor();}
+    if(action==='remove-set') {const [set]=workoutDraft.exercises[Number(button.dataset.ex)].sets.splice(Number(button.dataset.set),1);clearTimeout(pendingSetTimers.get(set));pendingSetTimers.delete(set);scheduleWorkoutDraftSave();return renderWorkoutEditor();}
     if(action==='view-exercise') {selectedExercise=button.dataset.name;exerciseMetric=exerciseSeries(selectedExercise,'max').every(point=>point.value===0)?'reps':'max';progressMetric='exercise';tab='progress';render();window.scrollTo({top:0,behavior:'smooth'});return;}
+    if(action==='view-summary-chart' && ['weight','sleep'].includes(button.dataset.kind)){progressMetric=button.dataset.kind;period='30';tab='progress';render();window.scrollTo({top:0,behavior:'smooth'});return;}
     if(action.startsWith('edit-')) {const type=action.slice(5)==='workout'?'workouts':action.slice(5);const row=state[type]?.find(item=>item.id===rowId);if(row) type==='workouts'?openWorkout(row):openSimple(type,row);return;}
     if(action.startsWith('delete-')) {const type=action.slice(7)==='workout'?'workouts':action.slice(7);if(!state[type]?.some(item=>item.id===rowId)) return;if(confirm('Poistetaanko tämä merkintä?')) {const nextState={...state,[type]:state[type].filter(item=>item.id!==rowId)};if(!persist(nextState))return;if(type==='weight')cancelGarminSync();state=nextState;render();toast('Merkintä poistettu');}return;}
     if(action==='export') return exportBackup();
     if(action==='import') return document.getElementById('import-file').click();
-    if(action==='clear') {if(confirm('Poistetaanko kaikki treenit, yömerkinnät, aloitettu yö ja painot tältä laitteelta? Toimintoa ei voi perua ilman varmuuskopiota.')) {const nextState=emptyState();if(state.settings)nextState.settings=state.settings;if(!persist(nextState))return;cancelGarminSync();state=nextState;render();toast('Kaikki merkinnät poistettu');}return;}
+    if(action==='clear') {if(confirm('Poistetaanko kaikki treenit, yömerkinnät, aloitetut yöt, keskeneräinen treeni ja painot tältä laitteelta? Toimintoa ei voi perua ilman varmuuskopiota.')) {const nextState=emptyState();if(state.settings)nextState.settings=state.settings;if(!persist(nextState))return;cancelGarminSync();resetWorkoutEditor();if(dialog.open)dialog.close();state=nextState;render();toast('Kaikki merkinnät poistettu');}return;}
     if(action==='install'&&deferredInstall) {deferredInstall.prompt();deferredInstall.userChoice.finally(()=>{deferredInstall=null;render();});}
   });
   document.addEventListener('keydown',event=>{
+    const handle=event.target.closest?.('[data-action="drag-exercise"]');
+    if(handle && ['ArrowUp','ArrowDown'].includes(event.key)){event.preventDefault();return moveWorkoutExercise(Number(handle.dataset.ex),Number(handle.dataset.ex)+(event.key==='ArrowUp'?-1:1));}
     const point=event.target.closest?.('[data-chart-point]');if(!point)return;
     const id=point.dataset.chartPoint,entry=charts.get(id);if(!entry?.interactive)return;
     let index=Number(point.dataset.index);
@@ -1005,6 +1240,7 @@
     event.preventDefault();selectChartPoint(id,index);
   });
   document.addEventListener('input',event=>{
+    if(event.target.id==='workout-program-categories'){updateProgramFields();return;}
     const el=event.target, field=el.dataset.draft;
     if(!field||!workoutDraft) return;
     if(field==='date') workoutDraft.date=el.value;
@@ -1016,22 +1252,27 @@
       if (field==='weight') set._weightEdited=true;
       scheduleSetTimer(ex,set);
     }
+    scheduleWorkoutDraftSave();
   });
   document.addEventListener('submit',event=>{
+    if(event.target.id==='workout-program-form'){event.preventDefault();saveWorkoutProgram(event.target);return;}
     if(event.target.id==='garmin-window-form'){event.preventDefault();return saveGarminWindow(event.target);}
     if(event.target.id==='garmin-connection-form'){event.preventDefault();return saveGarminConnection(event.target);}
     if(event.target.id==='simple-form') {event.preventDefault();saveSimple(event.target);}
     if(event.target.id==='rest-settings-form') {event.preventDefault();saveRestSettings(event.target);}
   });
   document.addEventListener('change',event=>{
+    if(event.target.id==='workout-program-type'){updateProgramFields();return;}
     if(event.target.id==='exercise-select') {selectedExercise=event.target.value;render();}
     if(event.target.dataset.draft==='unit' && workoutDraft) {
       const index=Number(event.target.dataset.ex);
       changeExerciseUnit(index,event.target.value);
       workoutDraft.exercises[index]._unitEdited=true;
+      scheduleWorkoutDraftSave();
     }
-    if(event.target.id==='workout-category' && workoutDraft && isCategory(event.target.value)) {
+    if(event.target.id==='workout-category' && workoutDraft && workoutCategoryOptions().includes(event.target.value)) {
       workoutDraft.category=event.target.value;
+      scheduleWorkoutDraftSave();
       renderWorkoutEditor();
     }
   });
@@ -1040,20 +1281,28 @@
     try {
       if(file.size>5_000_000) throw Error('Tiedosto on liian suuri.');
       const imported=validateBackup(JSON.parse(await file.text()));
-      if(confirm('Korvataanko tämän selaimen nykyiset merkinnät varmuuskopion tiedoilla?') && persist(imported)) {cancelGarminSync();state=imported;tab='home';render();toast('Varmuuskopio tuotu');}
+      if(confirm('Korvataanko tämän selaimen nykyiset merkinnät varmuuskopion tiedoilla?') && persist(imported)) {cancelGarminSync();resetWorkoutEditor();if(dialog.open)dialog.close();state=imported;tab='home';render();toast('Varmuuskopio tuotu');}
     } catch(err) {alert(`Tuonti epäonnistui: ${err.message}`);}
   });
-  dialog.addEventListener('click',event=>{if(event.target===dialog) {cancelPendingSetTimers();dialog.close();}});
-  dialog.addEventListener('close',()=>{cancelPendingSetTimers();unlockPageScroll();dialog.classList.remove('chart-modal');if(expandedChartId)charts.delete(expandedChartId);expandedChartId=null;watchCharts();});
+  document.addEventListener('pointerdown',beginExerciseDrag);
+  document.addEventListener('pointermove',continueExerciseDrag,{passive:false});
+  document.addEventListener('pointerup',event=>finishExerciseDrag(true,event));
+  document.addEventListener('pointercancel',event=>finishExerciseDrag(false,event));
+  dialog.addEventListener('click',event=>{if(event.target===dialog)closeEntryDialog();});
+  dialog.addEventListener('cancel',event=>{if(!saveWorkoutDraft())event.preventDefault();});
+  dialog.addEventListener('close',()=>{saveWorkoutDraft();resetWorkoutEditor();cancelExpandedChartLayout();unlockPageScroll();dialog.classList.remove('chart-modal');if(expandedChartId)charts.delete(expandedChartId);expandedChartId=null;watchCharts();});
   for (const name of ['gesturestart','gesturechange']) document.addEventListener(name,event=>event.preventDefault(),{passive:false});
   document.addEventListener('touchstart',event=>{if (event.touches?.length>1) event.preventDefault();},{passive:false});
-  document.addEventListener('touchmove',event=>{if (event.touches?.length>1 || (dialog.open && !event.target.closest?.('.dialog-inner'))) event.preventDefault();},{passive:false});
+  document.addEventListener('touchmove',event=>{if (event.touches?.length>1 || (dialog.open && !event.target.closest?.('.dialog-inner,.chart-dialog-head'))) event.preventDefault();},{passive:false});
   document.addEventListener('wheel',event=>{if (dialog.open && !event.target.closest?.('.dialog-inner')) event.preventDefault();},{passive:false});
   document.addEventListener('visibilitychange',renderRestTimer);
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){finishExerciseDrag(false);saveWorkoutDraft();}});
+  window.addEventListener('pagehide',()=>{finishExerciseDrag(false);saveWorkoutDraft();});
   window.addEventListener('pageshow',renderRestTimer);
   window.addEventListener('pageshow',()=>syncGarmin({automatic:true}));
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='hidden')syncGarmin({automatic:true});});
-  window.addEventListener('resize',sizeCharts);
+  window.addEventListener('resize',()=>{sizeCharts();settleExpandedChartLayout();});
+  window.addEventListener('orientationchange',settleExpandedChartLayout);
   window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();deferredInstall=event;if(tab==='settings')render();});
   if('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(()=>{});
   render();

@@ -2,6 +2,8 @@
 
 Tämä dokumentti kuvaa GitHub Pages -version nykyiset toimintatavat 17.11.2026 hyväksytyn päivityksen jälkeen. Se on tarkoitettu seuraavalle kehittäjälle ja AI-avustajalle. Varsinaiset ohjeet muutosten tekemiseen ovat myös juuren [AGENTS.md](../AGENTS.md)-tiedostossa.
 
+18.11.2026 hyväksytyt treeniohjelmat, keskeneräinen kirjaus ja korttien/suurennetun käyrän päivitys on kuvattu tiedostoissa [WORKOUT-PROGRAM.md](WORKOUT-PROGRAM.md), [NEXT-WORKOUT.md](NEXT-WORKOUT.md) ja [RELEASE-2026-11-18.md](RELEASE-2026-11-18.md). Ne laajentavat alla kuvattua aiempaa pohjaa.
+
 ## Julkaisut ja lähdekoodi
 
 | Kohde | Osoite ja toimintatapa |
@@ -37,7 +39,7 @@ Kaikki sovelluksen resurssipolut, manifestin scope ja service workerin rekister�
 
 ## Tallennusmuoto
 
-`localStorage['kuntokayra_v1']` sisältää yhden JSON-olion, jossa on taulukot `workouts`, `sleep` ja `weight` sekä mahdolliset valinnaiset `sleepPending`- ja `settings`-oliot. Avaimen nimi säilyy myös uusissa ominaisuuksissa. `loadState()` lukee olemassa olevan olion sellaisenaan; päivitys ei tarvitse migraatiota eikä käynnistyksessä tehdä tallennuskirjoitusta.
+`localStorage['kuntokayra_v1']` sisältää yhden JSON-olion, jossa on taulukot `workouts`, `sleep` ja `weight` sekä mahdolliset valinnaiset `workoutPending`-, `sleepPending`- ja `settings`-oliot. Avaimen nimi säilyy myös uusissa ominaisuuksissa. `loadState()` lukee olemassa olevan olion sellaisenaan; päivitys ei tarvitse migraatiota eikä käynnistyksessä tehdä tallennuskirjoitusta.
 
 Seuraava esimerkki on synteettinen. Valinnaisia kenttiä ei välttämättä ole vanhoissa kirjauksissa:
 
@@ -82,6 +84,8 @@ Seuraava esimerkki on synteettinen. Valinnaisia kenttiä ei välttämättä ole 
 - `exercise.unit`: `kg` tai `lbs`. Puuttuva kenttä tarkoittaa lukuvaiheessa kg:aa. Painon lukuarvon merkitys ei riipu tästä kentästä: tallennettu paino on aina kg.
 - `sleepPending`: `{ id, startedAt, endedAt? }`. `id` on ei-tyhjä enintään 100 merkin tunniste. Aikaleimat ovat muotoa `YYYY-MM-DDTHH:mm:ss.sssZ`; mahdollinen `endedAt` on vähintään `startedAt`. Vanhoissa tiedoissa kenttä voi puuttua. Aloitettua yötä ei siirretä valmiisiin yömerkintöihin ennen tarkistuksen tallennusta.
 - `settings.restSeconds`: kokonaisluku 15–1800. Puuttuva asetus tarkoittaa lukuvaiheessa 180 sekuntia; puuttuvaa kenttää ei kirjoiteta käynnistyksessä.
+- `settings.workoutProgram`: valittu esiasetustunniste `{type}` tai `{type:'custom',categories:[...]}`. Puuttuva ohjelma käyttää aiempaa Etukroppa/Takakroppa-oletusta. Vaihto ei kirjoita treenien luokkia uudelleen.
+- `workoutPending`: keskeneräinen uusi treeni, joka ei kuulu valmiisiin treeneihin tai käyriin. Muoto, osittaisten kenttien validointi ja editorin metadata on kuvattu [NEXT-WORKOUT.md](NEXT-WORKOUT.md)-tiedostossa. Kenttä säilyy version 1 varmuuskopioissa; puuttuminen ei aiheuta käynnistyksen kirjoitusta.
 - `settings.garmin`: valinnainen `{ start: '06:00', end: '12:00' }`. Kellonajat tarkoittavat saman päivän Helsingin aikaa, alku mukaan lukien ja loppu pois lukien. Alkuaika on ennen loppuaikaa. Asetus kulkee version 1 varmuuskopiossa ja säilyy taukoasetusta muutettaessa.
 - Garminista tuodun painorivin valinnaiset kentät ovat `source: 'garmin'`, `garminId` ja `measuredAt` (ISO). Muut painorivit säilyvät käsinkirjauksina, eikä niihin lisätä alkuperää automaattisesti. Painot tallentuvat edelleen kilogrammoina. Yhteysasetukset ovat eri localStorage-avaimessa ja jäävät varmuuskopion ulkopuolelle.
 

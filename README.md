@@ -24,13 +24,15 @@ Testejä varten tarvitaan Node.js 22 tai uudempi; `.nvmrc` ja CI käyttävät No
 npm test
 ```
 
-Komento tarkistaa sovelluksen ja Garmin-palvelun JavaScriptin syntaksin ja ajaa 142 regressiotestiä. Testit käyttävät simuloitua selainympäristöä ja synteettistä dataa. GitHub Actions ajaa saman komennon automaattisesti. Pelkät syntaksitarkistukset voi ajaa komennolla `npm run check`.
+Komento tarkistaa sovelluksen ja Garmin-palvelun JavaScriptin syntaksin ja ajaa 190 regressiotestiä. Testit käyttävät simuloitua selainympäristöä ja synteettistä dataa. GitHub Actions ajaa saman komennon automaattisesti. Pelkät syntaksitarkistukset voi ajaa komennolla `npm run check`.
 
 ## Käyttö
 
-- Kirjaa treenejä kategorioihin Etukroppa ja Takakroppa. Seuraavaan treeniin ehdotetaan vastakkaista kategoriaa.
+- Valitse asetusten kompaktista Treeniohjelma-kortista Etukroppa/Takakroppa, Push/Pull/Legs, Upper/Lower, Fullbody tai omat kategoriat. Seuraava treenityyppi kiertää listan järjestyksessä. Vanhojen treenien kategoriat säilyvät.
+- **Seuraava treeni** -kotikortti avaa viimeisimmän saman kategorian treenin liikkeet, sarjamäärät ja painot. Toistot jäävät tyhjiksi. Uusi keskeneräinen treeni tallentuu automaattisesti ja jatkuu samasta kortista. Liikkeiden järjestystä voi vaihtaa avattavassa listassa vetämällä tai nuolilla.
+- Editorin alareunan **Poista treeni** vaatii kaksi vahvistusta. Paino- ja yöaikakortit avaavat 30 päivän käyrän. Suurennetun käyrän sulkupainike pysyy vieritettävän piirtoalueen ulkopuolella myös näytön kääntyessä.
 - Sovellus muistaa aiemmat liikkeet, aloituspainot ja liikkeen kg/lbs-valinnan. Uusi sarja kopioi ensimmäisen sarjan nykyisen painon.
-- Näet sarjan yhteydessä edellisen treenikerran vastaavan sarjan toistot. Valmis paino- ja toistokirjaus käynnistää sarjataukoajastimen. Oletus on 3 minuuttia; asetuksissa voit valita 15 sekunnin–30 minuutin tauon.
+- Näet sarjan yhteydessä edellisen treenikerran vastaavan sarjan painon ja toistot. Valmis paino- ja toistokirjaus käynnistää sarjataukoajastimen. Oletus on 3 minuuttia; asetuksissa voit valita 15 sekunnin–30 minuutin tauon.
 - Avaa kategorian liikkeet Treenit-näkymässä ja tarkastele kehityskäyriä.
 - Paina illalla **Menen nukkumaan** ja aamulla **Olen herännyt**. Kellonajat säilyvät sovelluksen sulkemisen yli. Tarkista ja tarvittaessa korjaa yö ennen tallennusta. Voit edelleen kirjata yöajan käsin.
 - Käyrät näyttävät koko valitun aikavälin ilman sivuttaisvieritystä. **30 pv** -näkymässä voit valita pisteen ja nähdä sen tiedot myös suurennetussa käyrässä. Yöajan katkoviiva ja yhteenveto näyttävät valitun aikavälin keskiarvon.
@@ -39,7 +41,7 @@ Komento tarkistaa sovelluksen ja Garmin-palvelun JavaScriptin syntaksin ja ajaa 
 
 ## Tietojen tallennus ja siirtäminen
 
-Treenit, yöajat ja painot sekä keskeneräisen yön kellonajat ja taukoaika-asetus tallentuvat tämän laitteen selaimeen avaimella `kuntokayra_v1`. Tiedot eivät tallennu GitHubiin eivätkä synkronoidu laitteiden välillä. Tämä koodivarasto ei sisällä henkilökohtaisia päiväkirjamerkintöjä.
+Treenit, yöajat ja painot, keskeneräinen treeni ja yö sekä ohjelma- ja taukoasetukset tallentuvat tämän laitteen selaimeen avaimella `kuntokayra_v1`. Tiedot eivät tallennu GitHubiin eivätkä synkronoidu laitteiden välillä. Tämä koodivarasto ei sisällä henkilökohtaisia päiväkirjamerkintöjä.
 
 Saman GitHub Pages -osoitteen päivittäminen säilyttää tämän selaimen aiemmat merkinnät. Päivitys ei tarvitse tietojen tuontia tai tallennuksen uudelleenkirjoitusta. Vanhoja version 1 JSON-varmuuskopioita voi edelleen tuoda. Tuonti korvaa nykyiset tiedot vahvistuksen jälkeen; vie nykyiset tiedot talteen ennen tuontia, jos haluat säilyttää ne.
 
@@ -55,6 +57,8 @@ Jos siirryt aiemmasta Kuntokäyrä-osoitteesta:
 Varmuuskopiot ovat omia tietojasi. Säilytä ne omalla laitteellasi, älä tässä julkisessa koodivarastossa.
 
 Uusimmat toimintamuutokset on koottu [17.11.2026 päivitysmuistioon](docs/RELEASE-2026-11-17.md).
+
+Treeniohjelman, keskeneräisen kirjauksen, kotikorttien ja näytön käännön päivitys: [18.11.2026 päivitysmuistio](docs/RELEASE-2026-11-18.md), [ohjelman kuvaus](docs/WORKOUT-PROGRAM.md) ja [kirjauksen kuvaus](docs/NEXT-WORKOUT.md).
 
 ## Julkaisu ja päivittäminen
 

@@ -5,3 +5,6 @@ node_modules/
 .dev.vars*
 .env*
 .wrangler/
+/demo-data/
+/downloads/
+/scripts/generate-demo-data.mjs

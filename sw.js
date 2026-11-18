@@ -1,4 +1,4 @@
-const CACHE = 'kuntokayra-shell-v12';
+const CACHE = 'kuntokayra-shell-v15';
 const SHELL = ['./', './index.html', './styles.css', './app.js', './garmin-core.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));

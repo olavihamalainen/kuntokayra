@@ -345,11 +345,11 @@ await test("Previous reps show latest matching session/index/date without prefil
   const a = boot(history);
   await a.click("new-workout");
   await a.input("name", "Penkkipunnerrus");
-  assert.equal(hintText(a, 0, 0), "Viimeksi 13.11.: 8 toistoa");
+  assert.equal(hintText(a, 0, 0), "Viimeksi 55 kg × 8 · 13.11.");
   assert.equal(a.draft().exercises[0].sets[0].reps, "");
   await a.input("reps", "12");
   await a.click("add-set", { ex: 0 });
-  assert.equal(hintText(a, 0, 1), "Viimeksi 13.11.: 5 toistoa");
+  assert.equal(hintText(a, 0, 1), "Viimeksi 70 kg × 5 · 13.11.");
   assert.equal(a.draft().exercises[0].sets[0].reps, "12");
   assert.equal(a.draft().exercises[0].sets[1].reps, "");
   await a.click("add-set", { ex: 0 });
@@ -366,7 +366,7 @@ await test("Name changes update reps hints even with protected manually edited w
   await a.input("reps", "11", 0, 1);
   await a.input("name", "Kulmasoutu");
   assert.equal(a.weight(), "123");
-  assert.equal(hintText(a, 0, 0), "Viimeksi 14.11.: 8 toistoa");
+  assert.equal(hintText(a, 0, 0), "Viimeksi 60 kg × 8 · 14.11.");
   assert.equal(hintText(a, 0, 1), "Ei aiempaa vastaavaa sarjaa");
   assert.deepEqual(
     a.draft().exercises[0].sets.map((s) => s.reps),
@@ -381,13 +381,13 @@ await test("Editing excludes current workout from historical reps and weight loo
   initial.workouts.find((w) => w.id === "f1").exercises[0].sets[0].reps = 9;
   const a = boot(initial);
   await a.click("edit-workout", { id: "f2" });
-  assert.equal(hintText(a, 1, 0), "Viimeksi 10.11.: 9 toistoa");
+  assert.equal(hintText(a, 1, 0), "Viimeksi 40 kg × 9 · 10.11.");
   assert.equal(hintText(a, 1, 1), "Ei aiempaa vastaavaa sarjaa");
   assert.equal(a.weight(1), "55");
   await a.click("add-exercise");
   await a.input("name", "Penkkipunnerrus", 2);
   assert.equal(a.weight(2), "40");
-  assert.equal(hintText(a, 2, 0), "Viimeksi 10.11.: 9 toistoa");
+  assert.equal(hintText(a, 2, 0), "Viimeksi 40 kg × 9 · 10.11.");
 });
 await test("No prior matching movement shows missing history and keeps repetitions editable", async () => {
   const a = boot();
@@ -452,7 +452,7 @@ await test("Remembered exercise unit follows latest SAVE while first load/reps f
   assert.ok(
     Math.abs(Number(a.weight().replace(",", ".")) * 0.45359237 - 55) < 0.01,
   );
-  assert.equal(hintText(a, 0, 0), "Viimeksi 13.11.: 8 toistoa");
+  assert.equal(hintText(a, 0, 0), "Viimeksi 121,3 lbs × 8 · 13.11.");
 });
 await test("Pounds save canonical kg, reopen remembered unit, and backup roundtrip/chart retain physical loads", async () => {
   const a = boot();
@@ -534,6 +534,7 @@ await test("Automatic rest timer starts after stable valid set, counts 3:00 to z
   await a.clock.tick(1);
   assert.equal(a.countdown(), "3:00");
   assert.equal(a.document.querySelectorAll("[data-rest-countdown]").length, 2);
+  const draftWrites=a.writes.length;
   await a.clock.tick(1000);
   assert.equal(a.countdown(), "2:59");
   await a.clock.tick(178000);
@@ -543,7 +544,7 @@ await test("Automatic rest timer starts after stable valid set, counts 3:00 to z
   assert.ok(a.document.querySelector(".rest-timer.finished"));
   await a.clock.tick(1000);
   assert.equal(a.countdown(), "0:00");
-  assert.equal(a.writes.length, 0);
+  assert.equal(a.writes.length, draftWrites,'The countdown itself does not keep writing the draft');
 });
 await test("Rest timer uses elapsed background time and renders correctly on visibility change", async () => {
   const a = boot();
@@ -710,3 +711,6 @@ await import("./charts.test.mjs");
 
 await import("./garmin-core.test.mjs");
 await import("./garmin-integration.test.mjs");
+await import("./workout-program.test.mjs");
+await import("./next-workout.test.mjs");
+await import("./editor-shortcuts.test.mjs");

@@ -346,6 +346,67 @@ dialog.chart-modal .dialog-inner{max-height:var(--dialog-limit)}
 .field input[type="date"]::-webkit-datetime-edit,.field input[type="time"]::-webkit-datetime-edit{min-inline-size:0;margin:0;padding:0;font:inherit;line-height:24px}
 .field input[type="date"]::-webkit-datetime-edit-fields-wrapper,.field input[type="time"]::-webkit-datetime-edit-fields-wrapper{margin:0;padding:0}
 
+/* The next session uses exactly one slot of the existing three-card grid. */
+button.metric-card{appearance:none;width:100%;min-width:0;text-align:left;align-items:stretch;color:inherit;font:inherit;cursor:pointer}
+button.metric-card:hover{border-color:#a8c9a1;background:#fbfdf8}
+button.metric-card:focus-visible{outline:3px solid #91ca9a;outline-offset:3px}
+.next-workout-card .next-workout-value{font-size:clamp(14px,3.8vw,24px);line-height:1.15;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.next-workout-card .metric-note{overflow-wrap:anywhere}
+.next-workout-card .metric-note>span{color:#397e52;font-weight:800}
+.workout-draft-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:3px 0 12px;min-width:0;color:#617a69;font-size:11px;line-height:1.45}
+.workout-draft-bar>span{min-width:0}
+.workout-draft-bar .text-action{font-size:11px;flex:none;padding:8px 0}
+.workout-draft-bar .save-failed{color:#ad4339}
+.workout-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:stretch}
+.workout-actions .button{min-width:0;white-space:normal;overflow-wrap:anywhere;padding:11px 6px;font-size:13px}
+/* Keep the close control outside the chart's scrolling and hit-testing surface. */
+.chart-dialog-head{position:relative;z-index:2;flex:0 0 auto;padding:22px 24px 15px;background:#fff;touch-action:manipulation}
+.chart-dialog-head .dialog-head{margin:0}
+.chart-dialog-head .dialog-close{position:relative;z-index:3;min-width:44px;min-height:44px;pointer-events:auto;touch-action:manipulation}
+.chart-expanded{position:relative;z-index:0;isolation:isolate;padding-top:0}
+.chart-expanded .chart-plot-scroll,.chart-expanded .chart-svg{overflow:hidden}
+@media(max-width:760px){.chart-dialog-head{padding:20px 14px 13px}.chart-dialog-head h2{font-size:22px;line-height:1.3}}
+@media(max-height:500px) and (orientation:landscape){.chart-dialog-head{padding:12px 16px 8px}.chart-dialog-head .dialog-head{align-items:center}.chart-dialog-head h2{font-size:20px}.chart-dialog-head .dialog-head p{display:none}}
+.workout-order{margin:0 0 17px;border:1px solid #dce7d7;border-radius:12px;background:#fafcf7;min-width:0}
+.workout-order>summary{padding:12px 14px;cursor:pointer;font-size:13px;font-weight:700;color:#315c42}
+.workout-order>summary>span{margin-left:5px;font-weight:500;color:#708575}
+.workout-order>.form-note{padding:0 12px;margin:9px 0;font-size:12px}
+.workout-order>.form-note:empty{display:none}
+.workout-order-list{max-height:288px;overflow:auto;overscroll-behavior:contain;touch-action:pan-y;padding:0 8px 8px;scrollbar-gutter:stable}
+.workout-order-row{display:grid;grid-template-columns:40px minmax(0,1fr) 36px 36px;align-items:center;gap:5px;min-height:50px;margin-top:5px;padding:5px;border:1px solid #e0e8db;border-radius:10px;background:#fff}
+.workout-order-row>span{font-size:12px;font-weight:650;line-height:1.35;overflow-wrap:anywhere}
+.workout-drag-handle,.workout-order-arrow{appearance:none;border:0;border-radius:8px;background:#edf4e8;color:#315c42;min-height:40px;font-size:19px;padding:0;display:grid;place-items:center}
+.workout-drag-handle{touch-action:none;cursor:grab;font-size:25px;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+.workout-drag-handle:active{cursor:grabbing}
+.workout-drag-handle:focus-visible,.workout-order-arrow:focus-visible{outline:3px solid #91ca9a;outline-offset:1px}
+.order-drag-source{opacity:.55}
+.order-drag-target{outline:2px solid #6aa576;outline-offset:-2px;background:#eaf4e4}
+
+/* The program chooser stays one compact row until explicitly opened. */
+.workout-program-panel{padding:0;min-width:0}
+.workout-program-panel>summary{display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:12px;align-items:center;padding:16px;list-style:none;cursor:pointer;border-radius:inherit}
+.workout-program-panel>summary::-webkit-details-marker{display:none}
+.workout-program-panel>summary:focus-visible{outline:3px solid #91ca9a;outline-offset:3px}
+.program-icon{width:34px;height:38px;display:grid;place-items:center;border-radius:11px;background:#e8f1e5;color:#285542}
+.program-icon svg{width:21px;height:21px}
+.program-summary{display:grid;gap:4px;min-width:0}
+.program-summary strong{font-size:15px;line-height:1.35}
+.program-summary>span{font-size:12px;line-height:1.45;color:#586e61;overflow-wrap:anywhere}
+.program-summary-end{display:grid;gap:4px;text-align:right;font-size:11px;color:#647b6b}
+.program-change{font-size:12px;font-weight:750;color:#327453}
+.program-change>span{display:inline-block;margin-left:3px;transition:transform .15s}
+.workout-program-panel[open] .program-change>span{transform:rotate(180deg)}
+.program-editor{padding:0 16px 18px;border-top:1px solid #e6ebe2}
+.program-editor form{padding-top:18px}
+.program-editor .field{margin-bottom:15px}
+.program-editor .program-custom-field{grid-template-rows:auto auto}
+.program-editor textarea{display:block;font:inherit;font-size:16px;line-height:1.5;box-sizing:border-box;width:100%;min-width:0;max-width:100%;min-height:144px;padding:11px 12px;border:1px solid #dce6d9;border-radius:12px;color:#254b39;background:#fff;resize:vertical;outline:0}
+.program-editor textarea:focus{border-color:#6da87a;box-shadow:0 0 0 3px #7cb9892a}
+#workout-program-custom[hidden]{display:none}
+.program-order{font-size:13px;font-weight:650;line-height:1.65;padding:12px;background:#f1f6ec;border-radius:10px;overflow-wrap:anywhere}
+.category-archive{display:block;margin-top:4px;font-size:11px;font-weight:500;color:#687c6d}
+@media(max-width:600px){.program-editor .button{width:100%;white-space:normal}.workout-program-panel>summary{gap:10px;padding:14px}}
+
 /* Garmin connection and morning-window settings use the existing form controls. */
 .garmin-panel h2{margin-bottom:10px}.garmin-panel form{margin-top:20px}.garmin-panel .field{margin-bottom:14px}.garmin-panel .field-row .field{margin-bottom:0}.garmin-panel .form-note{font-size:12px;line-height:1.6}.garmin-setup{margin:24px 0;padding:15px;border:1px solid #d6e4d1;border-radius:12px;background:#f5f8f1}.garmin-setup summary{cursor:pointer;font-weight:700;line-height:1.5}.garmin-setup li{margin:12px 0;line-height:1.6}.garmin-setup ol{padding-left:21px}.garmin-setup a{text-decoration:underline;text-underline-offset:3px}.garmin-setup code{font-size:12px;overflow-wrap:anywhere}.garmin-status{padding:13px;background:#edf5e8;border-radius:10px;line-height:1.6;overflow-wrap:anywhere}.garmin-weight-strip{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:22px;padding:17px 20px;background:#edf5e8;border:1px solid #d3e4cc;border-radius:14px}.garmin-weight-strip p{margin:5px 0 0;font-size:12px;line-height:1.5}.garmin-weight-strip .button{flex:none}
 @media(max-width:600px){.garmin-weight-strip{align-items:stretch;flex-direction:column;padding:15px}.garmin-weight-strip .button{width:100%}.garmin-panel .settings-actions{flex-direction:column}.garmin-panel .settings-actions .button{width:100%}}

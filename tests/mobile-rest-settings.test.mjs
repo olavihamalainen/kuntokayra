@@ -211,7 +211,7 @@ await test("History suggestions update after a new save instead of using stale c
   assert.equal(Number(app.weight()), 90);
   assert.match(
     app.document.getElementById("previous-reps-0-0").textContent,
-    /9 toistoa/,
+    /90 lbs × 9/,
   );
 });
 
