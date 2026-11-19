@@ -10,6 +10,9 @@ const appPath = fileURLToPath(new URL("../../app.js", import.meta.url));
 const appSource = fs.readFileSync(appPath, "utf8");
 const garminCorePath = fileURLToPath(new URL("../../garmin-core.js", import.meta.url));
 const garminCoreSource = fs.existsSync(garminCorePath) ? fs.readFileSync(garminCorePath, "utf8") : null;
+const syncSources = ["sync-core.js", "sync-client.js"].map(name => ({
+  filename: name, code: fs.readFileSync(new URL(`../../${name}`, import.meta.url), "utf8"),
+}));
 assert.match(
   appSource,
   /\}\)\(\);\s*$/,
@@ -31,10 +34,12 @@ const decode = (value) =>
 const key = "kuntokayra_v1";
 
 export function boot(initial, existingStorage, options = {}) {
+  const localKey = options.googleSession?.localStorageKey ?? key;
+  const journalKey = options.googleSession?.account ? `${localKey}_google_${options.googleSession.account}` : localKey;
   const storage =
     existingStorage ||
     new Map([
-      [key, JSON.stringify(initial || { workouts: [], sleep: [], weight: [] })],
+      [journalKey, JSON.stringify(initial || { workouts: [], sleep: [], weight: [] })],
     ]);
   const writes = [],
     nodes = [],
@@ -455,7 +460,17 @@ export function boot(initial, existingStorage, options = {}) {
   }
   browserWindow.fetch = fakeFetch;
   const navigator = { onLine: true };
+  const googleSession = options.googleSession && {
+    ...options.googleSession,
+    browserAuth: {
+      transport: (body, signal) => fakeFetch('/journal-sync/v1', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal,
+      }),
+      ...options.googleSession.browserAuth,
+    },
+  };
   const context = vm.createContext({
+    KuntokayraGoogleSession: googleSession,
     document,
     localStorage,
     navigator,
@@ -495,6 +510,8 @@ export function boot(initial, existingStorage, options = {}) {
     DOMException,
     Headers,
     Response,
+    TextEncoder,
+    TextDecoder,
     fetch: fakeFetch,
     btoa,
     atob,
@@ -513,6 +530,7 @@ export function boot(initial, existingStorage, options = {}) {
     console,
   });
   if (garminCoreSource) vm.runInContext(garminCoreSource, context, { filename: garminCorePath });
+  for (const { code, filename } of syncSources) vm.runInContext(code, context, { filename });
   vm.runInContext(source, context, { filename: appPath });
   const makeEvent = (type, target, fields = {}) => ({
     type,

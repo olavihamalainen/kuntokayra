@@ -5,14 +5,14 @@ Kuntokäyrä on suomenkielinen, puhelimella käytettävä treeni-, yöaika- ja p
 ## Projektin rakenne ja komennot
 
 - Sovelluksen varsinainen lähdekoodi on juuren `app.js`, `index.html` ja `styles.css`. `sw.js`, `manifest.webmanifest` ja kuvakkeet täydentävät PWA:n.
-- Sovellus on staattinen: ei palvelinta, tietokantaa, sovelluskehystä tai build-vaihetta. `package.json` koskee vain kehitystarkistuksia.
+- GitHub Pages -käyttöliittymä on staattinen ja build-vaiheeton. Valinnaiset Garmin-yhteys ja pilvisynkronointi käyttävät erillisiä Cloudflare Workereita. `package.json` koskee kehitystarkistuksia.
 - Testeihin tarvitaan Node.js 22 tai uudempi; `.nvmrc` ja CI käyttävät Node.js 24:ää. Riippuvuuksia ei tarvitse asentaa.
-- Aja `npm test`. Se sisältää JavaScriptin syntaksitarkistukset ja 190 regressiotestiä. Testit käyttävät vain synteettisiä tietoja.
+- Aja `npm test`. Se sisältää JavaScriptin syntaksitarkistukset ja 205 testiä. Testit käyttävät vain synteettisiä tietoja.
 - Säilytä suomenkieliset tekstit, puhelimeen sopiva asettelu, saavutettavat kenttänimet ja nykyinen vihreä ilme.
 
 ## Tallennussopimus
 
-- Merkinnät ovat käyttäjän selaimen `localStorage`-avaimessa **`kuntokayra_v1`**. Säilytä avain ja vanhojen merkintöjen luettavuus.
+- Kirjautumattoman päiväkirjan merkinnät ovat selaimen `localStorage`-avaimessa **`kuntokayra_v1`**. Säilytä avain ja vanhojen merkintöjen luettavuus. Kirjautunut profiili käyttää omaa avaintaan.
 - Älä tyhjennä, korvaa tai kirjoita tallennusta uudelleen käynnistyksen tai päivityksen sivuvaikutuksena. Älä lisää vanhoille treeneille kategoriaa päättelemällä sitä liikkeistä.
 - JSON-varmuuskopion nykyinen sopimus on **`version: 1`**. Säilytä myös vanhojen, valinnaisia kenttiä vailla olevien kopioiden tuonti.
 - `category`, `savedAt` ja liikkeen `unit` ovat vanhoista tiedoista mahdollisesti puuttuvia kenttiä. Puuttuva yksikkö tarkoittaa kg:aa lukuvaiheessa.
@@ -72,3 +72,10 @@ Kuntokäyrä on suomenkielinen, puhelimella käytettävä treeni-, yöaika- ja p
 - Tuonti, tyhjennys, painon poisto, aikaikkunan muutos ja yhteyden vaihto/poisto peruvat keskeneräisen haun. Myöhäistä vastausta ei saa yhdistää uuteen päiväkirjatilaan. Verkko-, vastaus- ja tallennusvirheet eivät korvaa merkintöjä.
 - Virhetarkenteet ovat kiinteitä käsittelykohtien tunnisteita, eivät koskaan Garminin vastausarvoja. Älä palauta tai kirjaa avaimia tai yksityisiä Garmin-vastauksia.
 - GitHub-päivitys ei julkaise käyttäjän omalla Cloudflare-tilillä olevaa Workeria. Älä raportoi Cloudflare-julkaisua tai oikeaa Garmin-hakua tarkistetuksi, ellei sitä ole todennettu.
+
+## Pilvisynkronointi
+
+- [sync-worker/README.md](sync-worker/README.md) sisältää tuotanto-Workerin käyttöönoton ja versiopalautuksen. Pidä testin ja tuotannon Workerit ja D1-kannat erillään. Käytä nykyisen kannan laajentamiseen numeroituja, lisääviä migraatioita.
+- Säilytä kirjautumisen, paikallisen profiilin, selainmerkintöjen kopioinnin ja synkronoinnin omat käyttäjän valinnat. Aiemmat merkinnät ja Garmin-yhteys voi kopioida omilla painikkeillaan. Synkronointi siirtää vain valmiit treenit, yöajat ja painot.
+- Säilytä täsmällinen frontend-alkuperä ja OAuth-paluuosoite. Kirjautumissalaisuudet kuuluvat Cloudflaren asetuksiin, ja paikallisessa varmuuskopiossa käytetään edelleen JSON-versiota 1.
+- Varmuuskopion tuonti ja merkintöjen tyhjennys pysäyttävät synkronoinnin tässä selaimessa. Yksittäisten merkintöjen poistot synkronoituvat tavallisten muutosten mukana. Säilytä ristiriitaisissa rinnakkaisissa muokkauksissa molemmat versiot.

@@ -1,8 +1,13 @@
 (() => {
   'use strict';
-  const STORAGE_KEY = 'kuntokayra_v1';
-  const GARMIN_CONNECTION_KEY = 'kuntokayra_garmin_connection_v1';
+  const googleSession = globalThis.KuntokayraGoogleSession;
+  const browserAuth = googleSession?.browserAuth;
+  const LOCAL_STORAGE_KEY = googleSession?.localStorageKey ?? 'kuntokayra_v1';
+  const STORAGE_KEY = googleSession?.account ? `${LOCAL_STORAGE_KEY}_google_${googleSession.account}` : LOCAL_STORAGE_KEY;
+  const GARMIN_BASE_KEY = googleSession?.garminStorageKey ?? 'kuntokayra_garmin_connection_v1';
+  const GARMIN_CONNECTION_KEY = browserAuth && googleSession.account ? `${GARMIN_BASE_KEY}_google_${googleSession.account}` : GARMIN_BASE_KEY;
   const Garmin = globalThis.KuntokayraGarmin;
+  const Sync = globalThis.KuntokayraSync;
   const PERIODS = [['30', '30 pv'], ['90', '3 kk'], ['180', '6 kk'], ['365', '12 kk'], ['all', 'Kaikki']];
   const WORKOUT_PROGRAMS = [
     {type:'front-back',label:'Etukroppa / Takakroppa',categories:['Etukroppa','Takakroppa']},
@@ -33,12 +38,13 @@
   const main = document.getElementById('main');
   const dialog = document.getElementById('entry-dialog');
   const dialogContent = document.getElementById('dialog-content');
+  let storedJournal;
   let state = loadState();
   let garminConnection = loadGarminConnection();
   let garminPending = null;
   let garminSyncEpoch = 0;
   let garminMessage = '';
-  let tab = 'home';
+  let tab = googleSession?.showSettings ? 'settings' : 'home';
   let period = '90';
   let progressMetric = 'weight';
   let exerciseMetric = 'max';
@@ -99,14 +105,31 @@
   function emptyState() { return { workouts: [], sleep: [], weight: [] }; }
   function loadState() {
     try {
-      const raw = JSON.parse(localStorage.getItem(STORAGE_KEY));
+      storedJournal = localStorage.getItem(STORAGE_KEY);
+      const raw = JSON.parse(storedJournal);
       if (raw && Array.isArray(raw.workouts) && Array.isArray(raw.sleep) && Array.isArray(raw.weight)) return raw;
     } catch (_) { /* A damaged local entry is handled by starting empty. */ }
     return emptyState();
   }
-  function persist(nextState = state) {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState)); return true; }
-    catch (_) { toast('Tallennus ei onnistunut. Tarkista selaimen tallennustila.'); return false; }
+  function journalStorageIsCurrent() {
+    try { return localStorage.getItem(STORAGE_KEY) === storedJournal; }
+    catch (_) { return false; }
+  }
+  function persist(nextState = state, fromCloud = false) {
+    if (cloudSync && (fromCloud || cloudSync.metadata()) && !journalStorageIsCurrent()) {
+      toast('Merkinnät muuttuivat toisessa välilehdessä. Avaa sivu uudelleen.');
+      return false;
+    }
+    try {
+      const serialized = JSON.stringify(nextState);
+      localStorage.setItem(STORAGE_KEY, serialized);
+      storedJournal = serialized;
+    } catch (_) {
+      toast('Tallennus ei onnistunut. Tarkista selaimen tallennustila.');
+      return false;
+    }
+    if (!fromCloud && cloudSync && Sync.kinds.some(kind => nextState[kind] !== state[kind])) cloudSync.schedule();
+    return true;
   }
   function readPendingWorkout(value) {
     if(!value || typeof value!=='object' || typeof value.id!=='string' || !value.id.trim() || value.id.length>100 || !validTimestamp(value.savedAt) || (value.date!=='' && !validDate(value.date)) || !Array.isArray(value.exercises) || value.exercises.length>100)return null;
@@ -197,9 +220,9 @@
     } catch (_) { return false; }
   }
   function validConnectionToken(value) { return typeof value==='string' && /^[A-Za-z0-9_-]{32,256}$/.test(value); }
-  function loadGarminConnection() {
+  function loadGarminConnection(key = GARMIN_CONNECTION_KEY) {
     try {
-      const value=JSON.parse(localStorage.getItem(GARMIN_CONNECTION_KEY));
+      const value=JSON.parse(localStorage.getItem(key));
       if(value && validGarminEndpoint(value.endpoint) && validConnectionToken(value.accessToken)) {
         return {endpoint:new URL(value.endpoint).origin,accessToken:value.accessToken,autoSync:value.autoSync!==false,...(validTimestamp(value.lastSuccessAt)?{lastSuccessAt:value.lastSuccessAt}:{}),...(typeof value.lastWindow==='string'?{lastWindow:value.lastWindow}:{})};
       }
@@ -209,6 +232,18 @@
   function writeGarminConnection(value) {
     try {localStorage.setItem(GARMIN_CONNECTION_KEY,JSON.stringify(value));return true;}
     catch (_) {setGarminMessage('Yhteysasetuksen tallennus epäonnistui. Aiempi yhteys säilyy.');return false;}
+  }
+  function previousGarminConnection() {
+    return browserAuth && googleSession.account && !garminConnection ? loadGarminConnection(GARMIN_BASE_KEY) : null;
+  }
+  function copyGarminConnection() {
+    const previous = previousGarminConnection();
+    if (!previous || !confirm('Kopioidaanko tämän selaimen aiempi Garmin-yhteys kirjautuneelle Google-tilille tällä laitteella?')) return;
+    const connection = { endpoint: previous.endpoint, accessToken: previous.accessToken, autoSync: previous.autoSync };
+    if (!writeGarminConnection(connection)) return;
+    garminConnection = connection;
+    garminMessage = 'Garmin-yhteys kopioitu tähän selaimeen.';
+    render();
   }
   function setGarminMessage(message) {
     garminMessage=message;
@@ -346,6 +381,7 @@
   function garminSettings() {
     const value=garminWindow(),connection=garminConnection;
     return `<section class="panel garmin-panel"><h2>Garmin-aamupainot</h2><p>Tuodaan viimeisten 30 päivän ensimmäinen aamupunnitus päivää kohti. Kellonajat ovat Suomen ajassa, myös kesäaikana. Käsin kirjatut painot säilyvät.</p>
+    ${previousGarminConnection() ? '<div class="settings-actions"><button type="button" class="button secondary" data-action="garmin-copy-connection">Kopioi selaimen aiempi Garmin-yhteys</button></div>' : ''}
     <form id="garmin-window-form"><div class="field-row"><div class="field"><label for="garmin-start">Alkaen</label><input id="garmin-start" name="start" type="time" value="${value.start}" required></div><div class="field"><label for="garmin-end">Ennen kelloa</label><input id="garmin-end" name="end" type="time" value="${value.end}" required></div></div><p class="form-note">Alkuaika kuuluu aikaväliin, loppuaika ei. Muutos koskee seuraavia tuonteja. Aiemmin tuotuja painoja ei poisteta automaattisesti.</p><div id="garmin-window-error" class="form-error" role="alert"></div><button type="submit" class="button secondary">Tallenna aamun aikaväli</button></form>
     <details class="garmin-setup"><summary>Cloudflare-yhteyden käyttöönotto</summary><ol><li><a href="./garmin-worker/worker.mjs" target="_blank" rel="noopener">Avaa taustapalvelun valmis koodi</a>. Luo omalle Cloudflare-tilillesi Worker-palvelu tai avaa nykyinen Worker. Korvaa sen koodi tällä koodilla ja valitse <strong>Deploy</strong>. Tarkemmat ohjeet ovat <a href="https://github.com/olavihamalainen/kuntokayra/blob/main/garmin-worker/README.md" target="_blank" rel="noopener">asennusohjeessa</a>.</li><li>Luo henkilökohtainen API-avain Garmin Connectin verkkosivujen asetuksissa. Lisää se vain Cloudflaren Worker-asetuksiin salaisuutena nimeltä <code>GARMIN_API_KEY</code>.</li><li>Paina alla <strong>Luo yhteysavain</strong>. Kopioi se Cloudflareen toiseksi salaisuudeksi nimeltä <code>APP_ACCESS_TOKEN</code>. Tämä on eri avain kuin Garmin-avain.</li><li>Liitä Workerin <code>https://…workers.dev</code>-osoite alle ja paina <strong>Tallenna yhteys ja hae</strong>.</li></ol><p>Jos käytit yhteyttä jo testisovelluksessa, säilytä nykyiset avaimet ja päivitä vain Worker-koodi sallimaan myös GitHub-sovelluksen osoite. Tallenna sama Worker-osoite ja yhteysavain tähän sovellukseen erikseen.</p><p>Garminin henkilökohtaista API-avainta ei syötetä Kuntokäyrään tai tähän keskusteluun.</p></details>
     <form id="garmin-connection-form"><div class="field garmin-endpoint"><label for="garmin-endpoint">Cloudflare-palvelun osoite</label><input id="garmin-endpoint" name="endpoint" type="url" inputmode="url" value="${esc(connection?.endpoint||'')}" placeholder="https://kuntokayra-garmin.oma-tili.workers.dev" autocomplete="off" autocapitalize="none" spellcheck="false" required></div><div class="field"><label for="garmin-access-token">Yhteysavain (APP_ACCESS_TOKEN)</label><input id="garmin-access-token" name="accessToken" type="password" value="${esc(connection?.accessToken||'')}" minlength="32" maxlength="256" autocomplete="off" autocapitalize="none" spellcheck="false" required></div><button class="text-action" type="button" data-action="garmin-new-token">Luo yhteysavain</button><p class="form-note">Yhteys muistetaan tässä selaimessa. Yhteysavain ei kuulu varmuuskopioihin. Uudet aamupainot haetaan automaattisesti sovelluksen avautuessa tai siihen palatessa. Kun päivän paino on löytynyt, samana päivänä ei tehdä turhia automaattisia hakuja.</p><div id="garmin-connection-error" class="form-error" role="alert"></div><div class="settings-actions"><button class="button secondary" type="submit">Tallenna yhteys ja hae</button>${connection?'<button class="button ghost" type="button" data-action="garmin-disconnect">Poista yhteys</button>':''}</div></form>
@@ -849,9 +885,10 @@
   function renderSettings() {
     return `${header('Asetukset','OMAT TIEDOT','Pidä kirjausdata omassa hallinnassasi.')}
     <div class="settings-stack">${workoutProgramSettings()}<section class="panel"><h2>Lisää puhelimen aloitusnäyttöön</h2><p>Avaa tämä sivu puhelimellasi. Asennettuna se näyttää ja toimii sovelluksen tavoin.</p><ol class="install-steps"><li>iPhone: avaa Safari, napauta Jaa-painiketta ja valitse <strong>Lisää Koti-valikkoon</strong>.</li><li>Android: avaa Chrome-valikko ja valitse <strong>Asenna sovellus</strong> tai <strong>Lisää aloitusnäyttöön</strong>.</li></ol>${deferredInstall?'<div class="settings-actions" style="margin-top:17px"><button type="button" class="button primary" data-action="install">Asenna sovellus</button></div>':''}</section>
+    ${cloudSettings()}
     ${garminSettings()}
     <section class="panel"><h2>Sarjataukon pituus</h2><p>Valitse 15 sekuntia–30 minuuttia. Uusi pituus koskee seuraavaa taukoa ja Uudelleen-painiketta. Käynnissä oleva tauko jatkuu nykyiseen loppuhetkeensä.</p><form id="rest-settings-form"><div class="field-row"><div class="field"><label for="rest-minutes">Minuutit</label><input id="rest-minutes" name="minutes" type="number" inputmode="numeric" min="0" max="30" step="1" value="${Math.floor(restSeconds()/60)}" required></div><div class="field"><label for="rest-seconds">Sekunnit</label><input id="rest-seconds" name="seconds" type="number" inputmode="numeric" min="0" max="59" step="1" value="${restSeconds()%60}" required></div></div><div id="rest-settings-error" class="form-error" role="alert"></div><button class="button secondary" type="submit">Tallenna taukoaika</button></form></section>
-    <section class="panel"><h2>Varmuuskopio</h2><p>Merkinnät tallentuvat tämän laitteen selaimeen. Ne eivät synkronoidu automaattisesti toiseen puhelimeen tai tietokoneeseen. Vie JSON-varmuuskopio talteen ja tuo se tarvittaessa takaisin.</p><div class="settings-actions"><button type="button" class="button secondary" data-action="export">${svg('download')} Vie tiedot</button><button type="button" class="button ghost" data-action="import">${svg('upload')} Tuo varmuuskopio</button></div></section>
+    <section class="panel"><h2>Varmuuskopio</h2><p>Vie tämän laitteen merkinnät JSON-varmuuskopioksi ja tuo ne tarvittaessa takaisin.</p><div class="settings-actions"><button type="button" class="button secondary" data-action="export">${svg('download')} Vie tiedot</button><button type="button" class="button ghost" data-action="import">${svg('upload')} Tuo varmuuskopio</button></div></section>
     <section class="panel"><h2>Poista kaikki merkinnät</h2><p>Tämä poistaa tämän selaimen treenit, yömerkinnät ja painot. Vie varmuuskopio ensin, jos haluat säilyttää ne. Garmin-yhteys säilyy ja voi tuoda painoja uudelleen. Voit poistaa yhteyden erikseen Garmin-asetuksista.</p><button type="button" class="button danger" data-action="clear">Poista tiedot</button></section></div>`;
   }
   function render() {
@@ -1082,8 +1119,10 @@
       if (!Number.isFinite(value)||value<1||value>1000) { error.textContent='Anna kelvollinen paino kilogrammoina.';return; }
       entry={id:editingId||id(),date,value};
     }
-    if (type==='sleep' && state.sleep.some(row=>row.date===date && row.id!==editingId) && !confirm('Tälle päivälle on jo yömerkintä. Korvataanko se näillä kellonajoilla?')) return;
-    const list=state[type].filter(row=>row.id!==editingId && row.date!==date);
+    const keepingDate = state[type].some(row => row.id === editingId && row.date === date);
+    if (type==='sleep' && !keepingDate && state.sleep.some(row=>row.date===date && row.id!==editingId) && !confirm('Tälle päivälle on jo yömerkintä. Korvataanko se näillä kellonajoilla?')) return;
+    // Editing an existing entry must preserve parallel versions for the same day.
+    const list=state[type].filter(row=>row.id!==editingId && (keepingDate || row.date!==date));
     list.push(entry);
     const nextState={...state,[type]:list};
     if (type==='sleep' && sleepReview) delete nextState.sleepPending;
@@ -1148,9 +1187,141 @@
   }
   function exportBackup() {
     if(!saveWorkoutDraft())return;
-    const payload={app:'Kuntokäyrä',version:1,exportedAt:new Date().toISOString(),data:state};
+    downloadBackup(Sync ? Sync.retainedBackup(state) : state);
+  }
+  function downloadBackup(data, label = 'varmuuskopio') {
+    const payload={app:'Kuntokäyrä',version:1,exportedAt:new Date().toISOString(),data};
     const url=URL.createObjectURL(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}));
-    const anchor=document.createElement('a');anchor.href=url;anchor.download=`kuntokayra-varmuuskopio-${today()}.json`;document.body.append(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Varmuuskopio ladattu');
+    const anchor=document.createElement('a');anchor.href=url;anchor.download=`kuntokayra-${label}-${today()}.json`;document.body.append(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Varmuuskopio ladattu');
+  }
+
+  const cloudSync = browserAuth && googleSession.account ? globalThis.KuntokayraCloud?.createController({
+    transport: browserAuth.transport,
+    readState: () => state,
+    writeState: nextState => {
+      if (!persist(nextState, true)) return false;
+      const recordsChanged = Sync.kinds.some(kind => state[kind] !== nextState[kind]);
+      state = nextState;
+      if (recordsChanged && tab !== 'settings' && !dialog.open) render();
+      return true;
+    },
+    sameStorage: journalStorageIsCurrent,
+    canApply: () => !dialog.open,
+    notify: updateCloudSettings,
+    download: data => downloadBackup(data, 'pilvikopio'),
+  }) : null;
+
+  function cloudStatus() {
+    const info = cloudSync.metadata();
+    const label = info?.enabled ? 'Käytössä tällä laitteella' : 'Pois päältä tällä laitteella';
+    const date = validTimestamp(info?.lastSyncedAt) ? ` Viimeisin tietojen päivitys ${new Date(info.lastSyncedAt).toLocaleString('fi-FI')}.` : '';
+    const outcome = cloudSync.status() || (googleSession?.result && googleSession.result !== 'signed-in' ? googleLoginMessage() : '');
+    return `${label}.${date}${outcome ? ` ${outcome}` : ''}`;
+  }
+
+  function googleLoginMessage() {
+    return {
+      denied: 'Tällä Google-tilillä ei ole käyttöoikeutta synkronointiin.',
+      retry: 'Kirjautuminen keskeytyi. Voit yrittää uudelleen.',
+      unavailable: 'Google-kirjautuminen odottaa pilvipalvelun asetuksia.',
+      'signed-out': 'Kirjauduit ulos.',
+    }[googleSession.result];
+  }
+
+  function cloudSettings() {
+    if (!browserAuth) return '';
+    if (!googleSession.account) {
+      const text = googleLoginMessage() ?? 'Kirjaudu Google-tilillä, jos haluat käyttää synkronointia.';
+      return `<section class="panel"><h2>Pilvisynkronointi</h2><p>${esc(text)}</p><button type="button" class="button secondary" data-action="cloud-google-sign-in">Kirjaudu Googlella</button></section>`;
+    }
+    if (!cloudSync) return '';
+    const info = cloudSync.metadata();
+    return `<details class="panel cloud-sync-panel" ${googleSession?.showSettings ? 'open' : ''}><summary><strong>Pilvisynkronointi</strong><span id="cloud-sync-label">${info?.enabled ? 'Käytössä' : 'Pois päältä'}</span></summary>
+      <p>Valmiit treenit, yöajat ja painot kopioidaan pilveen. Avaa sovellus samalla Google-tilillä toisella laitteella ja ota synkronointi käyttöön myös siellä.</p>
+      <p>Aloitetut kirjaukset ja asetukset ovat laitekohtaisia.</p>
+      <p id="cloud-sync-status" class="cloud-sync-status" role="status">${esc(cloudStatus())}</p>
+      <div class="settings-actions cloud-sync-actions">
+        <button type="button" class="button secondary" id="cloud-enable" data-action="cloud-enable" ${info?.enabled ? 'hidden' : ''} ${cloudSync.busy() ? 'disabled' : ''}>Ota synkronointi käyttöön</button>
+        <button type="button" class="button secondary" id="cloud-refresh" data-action="cloud-refresh" ${info?.enabled ? '' : 'hidden'} ${cloudSync.busy() ? 'disabled' : ''}>Synkronoi nyt</button>
+        <button type="button" class="button ghost" id="cloud-pause" data-action="cloud-pause" ${info?.enabled ? '' : 'hidden'}>Poista synkronointi käytöstä</button>
+        <button type="button" class="button ghost" id="cloud-export" data-action="cloud-export" ${info ? '' : 'hidden'} ${cloudSync.busy() ? 'disabled' : ''}>Lataa pilvikopio</button>
+      </div>
+      <div class="settings-actions">
+        ${canCopyLocalDiary() ? '<button type="button" class="button secondary" data-action="copy-local-diary">Kopioi selaimen aiemmat merkinnät</button>' : ''}
+        <button type="button" class="button ghost" data-action="cloud-google-sign-in">Kirjaudu uudelleen</button>
+        <button type="button" class="button ghost" data-action="cloud-google-sign-out">Kirjaudu ulos</button>
+      </div>
+    </details>`;
+  }
+
+  function canCopyLocalDiary() {
+    if (!googleSession?.account || cloudSync?.metadata() || Sync.kinds.some(kind => state[kind].length) ||
+        state.settings || state.workoutPending || state.sleepPending) return false;
+    try { return Boolean(localStorage.getItem(LOCAL_STORAGE_KEY)); }
+    catch { return false; }
+  }
+
+  function copyLocalDiary() {
+    if (!canCopyLocalDiary()) return;
+    if (!confirm('Kopioidaanko tämän selaimen aiemmat merkinnät kirjautuneen tilin selaintallennukseen? Alkuperäinen selaintallennus jää talteen.')) return;
+    try {
+      const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (!raw || raw.length > 5_000_000) throw Error('Tarkista merkintöjen koko.');
+      const original = JSON.parse(raw);
+      const copied = validateBackup({ version: 1, data: original });
+      for (const kind of Sync.kinds) {
+        const identifiers = new Set();
+        copied[kind].forEach((record, index) => {
+          const previousId = original[kind][index].id;
+          if (Sync.validId(previousId) && !identifiers.has(previousId)) record.id = previousId;
+          identifiers.add(record.id);
+        });
+      }
+      if (!persist(copied)) return;
+      state = copied;
+      render();
+      toast('Aiemmat merkinnät kopioitu');
+    } catch (error) { toast(`Kopiointi epäonnistui. ${error.message}`); }
+  }
+
+  async function browserAccountAction(button, callback) {
+    if (button.disabled) return;
+    button.disabled = true;
+    try { await callback(); }
+    catch (error) { toast(error.message); }
+    finally { button.disabled = false; }
+  }
+
+  function updateCloudSettings() {
+    const message = document.getElementById('cloud-sync-status');
+    if (!message) return;
+    const info = cloudSync.metadata();
+    const enable = document.getElementById('cloud-enable');
+    const refresh = document.getElementById('cloud-refresh');
+    const pause = document.getElementById('cloud-pause');
+    const backup = document.getElementById('cloud-export');
+    message.textContent = cloudStatus();
+    document.getElementById('cloud-sync-label').textContent = info?.enabled ? 'Käytössä' : 'Pois päältä';
+    enable.hidden = Boolean(info?.enabled);
+    refresh.hidden = pause.hidden = !info?.enabled;
+    backup.hidden = !info;
+    enable.disabled = refresh.disabled = backup.disabled = cloudSync.busy();
+  }
+
+  function clearLocalJournal() {
+    const cloudNotice = cloudSync?.metadata()?.enabled ? ' Pilvisynkronointi keskeytetään tällä laitteella ja pilvikopio jää talteen.' : '';
+    if (!confirm(`Poistetaanko treenit, yömerkinnät, aloitetut kirjaukset ja painot tältä laitteelta?${cloudNotice}`)) return;
+    const cleared = emptyState();
+    if (state.settings) cleared.settings = state.settings;
+    const nextState = cloudSync?.withPausedSync(cleared) ?? cleared;
+    if (!persist(nextState)) return;
+    cloudSync?.stop();
+    cancelGarminSync();
+    resetWorkoutEditor();
+    if (dialog.open) dialog.close();
+    state = nextState;
+    render();
+    toast('Merkinnät poistettu tältä laitteelta');
   }
 
   document.addEventListener('click',event=>{
@@ -1191,6 +1362,7 @@
     if(!action) return;
     if(action==='garmin-new-token')return generateGarminToken();
     if(action==='garmin-sync')return syncGarmin();
+    if (action === 'garmin-copy-connection') return copyGarminConnection();
     if(action==='garmin-disconnect')return disconnectGarmin();
     if(action==='expand-chart') return expandChart(button.dataset.chart);
     if(action==='sleep-start') return startSleep();
@@ -1222,9 +1394,23 @@
     if(action==='view-summary-chart' && ['weight','sleep'].includes(button.dataset.kind)){progressMetric=button.dataset.kind;period='30';tab='progress';render();window.scrollTo({top:0,behavior:'smooth'});return;}
     if(action.startsWith('edit-')) {const type=action.slice(5)==='workout'?'workouts':action.slice(5);const row=state[type]?.find(item=>item.id===rowId);if(row) type==='workouts'?openWorkout(row):openSimple(type,row);return;}
     if(action.startsWith('delete-')) {const type=action.slice(7)==='workout'?'workouts':action.slice(7);if(!state[type]?.some(item=>item.id===rowId)) return;if(confirm('Poistetaanko tämä merkintä?')) {const nextState={...state,[type]:state[type].filter(item=>item.id!==rowId)};if(!persist(nextState))return;if(type==='weight')cancelGarminSync();state=nextState;render();toast('Merkintä poistettu');}return;}
+    if (action === 'cloud-enable' && cloudSync && !cloudSync.metadata()?.enabled && !cloudSync.busy()) {
+      if (confirm('Yhdistetäänkö tämän laitteen valmiit treenit, yöajat ja painot yksityiseen pilvikopioon? Merkinnät tallentuvat edelleen myös selaimeen.')) return cloudSync.enable();
+      return;
+    }
+    if (action === 'cloud-google-sign-in' && browserAuth) return browserAccountAction(button, browserAuth.signIn);
+    if (action === 'cloud-google-sign-out' && browserAuth) return browserAccountAction(button, async () => {
+      cloudSync?.stop();
+      cancelGarminSync();
+      await browserAuth.signOut();
+    });
+    if (action === 'copy-local-diary') return copyLocalDiary();
+    if (action === 'cloud-refresh') return cloudSync?.sync();
+    if (action === 'cloud-pause') return cloudSync?.pause();
+    if (action === 'cloud-export') return cloudSync?.exportCloud();
     if(action==='export') return exportBackup();
     if(action==='import') return document.getElementById('import-file').click();
-    if(action==='clear') {if(confirm('Poistetaanko kaikki treenit, yömerkinnät, aloitetut yöt, keskeneräinen treeni ja painot tältä laitteelta? Toimintoa ei voi perua ilman varmuuskopiota.')) {const nextState=emptyState();if(state.settings)nextState.settings=state.settings;if(!persist(nextState))return;cancelGarminSync();resetWorkoutEditor();if(dialog.open)dialog.close();state=nextState;render();toast('Kaikki merkinnät poistettu');}return;}
+    if(action==='clear') return clearLocalJournal();
     if(action==='install'&&deferredInstall) {deferredInstall.prompt();deferredInstall.userChoice.finally(()=>{deferredInstall=null;render();});}
   });
   document.addEventListener('keydown',event=>{
@@ -1281,7 +1467,15 @@
     try {
       if(file.size>5_000_000) throw Error('Tiedosto on liian suuri.');
       const imported=validateBackup(JSON.parse(await file.text()));
-      if(confirm('Korvataanko tämän selaimen nykyiset merkinnät varmuuskopion tiedoilla?') && persist(imported)) {cancelGarminSync();resetWorkoutEditor();if(dialog.open)dialog.close();state=imported;tab='home';render();toast('Varmuuskopio tuotu');}
+      const cloudNotice = cloudSync?.metadata()?.enabled ? ' Pilvisynkronointi keskeytetään tällä laitteella ja pilvikopio jää talteen.' : '';
+      const nextState = cloudSync?.withPausedSync(imported) ?? imported;
+      if(confirm(`Korvataanko tämän selaimen nykyiset merkinnät varmuuskopion tiedoilla?${cloudNotice}`) && persist(nextState)) {
+        cloudSync?.stop();
+        cancelGarminSync();
+        resetWorkoutEditor();
+        if(dialog.open)dialog.close();
+        state=nextState;tab='home';render();toast('Varmuuskopio tuotu');
+      }
     } catch(err) {alert(`Tuonti epäonnistui: ${err.message}`);}
   });
   document.addEventListener('pointerdown',beginExerciseDrag);
@@ -1301,10 +1495,20 @@
   window.addEventListener('pageshow',renderRestTimer);
   window.addEventListener('pageshow',()=>syncGarmin({automatic:true}));
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='hidden')syncGarmin({automatic:true});});
+  if (cloudSync) {
+    const autoSync = () => cloudSync.sync({ automatic: true });
+    window.addEventListener('pageshow', autoSync);
+    window.addEventListener('online', () => cloudSync.sync());
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'hidden') autoSync();
+    });
+    dialog.addEventListener('close', () => cloudSync.afterDialog());
+  }
   window.addEventListener('resize',()=>{sizeCharts();settleExpandedChartLayout();});
   window.addEventListener('orientationchange',settleExpandedChartLayout);
   window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();deferredInstall=event;if(tab==='settings')render();});
   if('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(()=>{});
   render();
+  cloudSync?.sync({ automatic: true });
   syncGarmin({automatic:true});
 })();

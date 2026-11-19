@@ -410,3 +410,13 @@ button.metric-card:focus-visible{outline:3px solid #91ca9a;outline-offset:3px}
 /* Garmin connection and morning-window settings use the existing form controls. */
 .garmin-panel h2{margin-bottom:10px}.garmin-panel form{margin-top:20px}.garmin-panel .field{margin-bottom:14px}.garmin-panel .field-row .field{margin-bottom:0}.garmin-panel .form-note{font-size:12px;line-height:1.6}.garmin-setup{margin:24px 0;padding:15px;border:1px solid #d6e4d1;border-radius:12px;background:#f5f8f1}.garmin-setup summary{cursor:pointer;font-weight:700;line-height:1.5}.garmin-setup li{margin:12px 0;line-height:1.6}.garmin-setup ol{padding-left:21px}.garmin-setup a{text-decoration:underline;text-underline-offset:3px}.garmin-setup code{font-size:12px;overflow-wrap:anywhere}.garmin-status{padding:13px;background:#edf5e8;border-radius:10px;line-height:1.6;overflow-wrap:anywhere}.garmin-weight-strip{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:22px;padding:17px 20px;background:#edf5e8;border:1px solid #d3e4cc;border-radius:14px}.garmin-weight-strip p{margin:5px 0 0;font-size:12px;line-height:1.5}.garmin-weight-strip .button{flex:none}
 @media(max-width:600px){.garmin-weight-strip{align-items:stretch;flex-direction:column;padding:15px}.garmin-weight-strip .button{width:100%}.garmin-panel .settings-actions{flex-direction:column}.garmin-panel .settings-actions .button{width:100%}}
+
+.cloud-sync-panel > summary{display:flex;justify-content:space-between;align-items:center;gap:12px;cursor:pointer;list-style:none}
+.cloud-sync-panel > summary::-webkit-details-marker{display:none}
+.cloud-sync-panel > summary::before{content:'+';order:2;color:#437758;font-weight:700}
+.cloud-sync-panel[open] > summary::before{content:'−'}
+.cloud-sync-panel > summary > strong{flex:1}
+#cloud-sync-label{font-size:13px;color:#416a50}
+.cloud-sync-status{padding:10px 12px;background:#edf5e8;border-radius:10px}
+.cloud-sync-actions .button{white-space:normal;text-align:center}
+.cloud-sync-actions .button[hidden]{display:none}

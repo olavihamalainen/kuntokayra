@@ -18,7 +18,7 @@ Sovellustiedostot tuotiin GitHubiin alkuperäisen projektin versiosta `2841d89c3
 
 ## Tekniikka ja tiedostokartta
 
-Sovellus on build-vaiheeton HTML/CSS/JavaScript-PWA ilman selainpuolen npm-riippuvuuksia, kirjautumista tai yhteistä tietokantaa. Valinnainen Garmin-aamupainojen haku käyttää käyttäjän erikseen julkaisemaa Cloudflare Workeria. GitHub Pages -osoite on julkinen; henkilökohtaiset merkinnät pysyvät kunkin käyttäjän omassa selaimessa. Garmin-toteutus ja sen rajat: [GARMIN.md](GARMIN.md).
+Sovellus on build-vaiheeton HTML/CSS/JavaScript-PWA ilman selainpuolen npm-riippuvuuksia. Julkinen GitHub Pages tarjoaa käyttöliittymän. Merkinnät tallentuvat ensin selaimeen. Valinnainen Google-kirjautuminen ja tilikohtainen D1-synkronointi käyttävät omaa Workeriaan. Garmin-aamupainojen haku käyttää erillistä Garmin-Workeria. [Pilvisynkronointi](../sync-worker/README.md) · [Garmin](GARMIN.md)
 
 | Tiedosto | Tehtävä |
 | --- | --- |
@@ -26,6 +26,9 @@ Sovellus on build-vaiheeton HTML/CSS/JavaScript-PWA ilman selainpuolen npm-riipp
 | `app.js` | Tallennus, näkymät, SVG-käyrät, lomakkeet, yksiköt, historiahaut ja ajastin yhdessä IIFE-sulkeumassa |
 | `garmin-core.js` | Aamupunnitusten Helsingin aikarajaus, validointi ja manuaalisia kirjauksia suojaava yhdistäminen |
 | `garmin-worker/` | Erillinen Cloudflare Worker, sen käyttöönotto-ohje, julkaisuasetukset ja synteettiset testit |
+| `browser-config.js`, `browser-bootstrap.js` | Synkronointipalvelun osoite, kirjautumisen paluu ja tilikohtainen selainistunto |
+| `sync-core.js`, `sync-client.js` | Merkintämuutokset, pilviyhteys ja tilikohtaisen päiväkirjan yhdistäminen |
+| `sync-worker/` | Tuotannon OAuth- ja synkronointirajapinta, D1-migraatiot ja käyttöönotto-ohje |
 | `styles.css` | Responsiivinen vihreä käyttöliittymä, mobiilinavigaatio, dialogi ja taukoajastin |
 | `manifest.webmanifest` | PWA:n nimi, kuvakkeet, aloitusosoite ja scope |
 | `sw.js` | Sovellustiedostojen esivälimuisti ja verkkoyhteyttä ensin käyttävä resurssihaku |
@@ -40,6 +43,8 @@ Kaikki sovelluksen resurssipolut, manifestin scope ja service workerin rekister�
 ## Tallennusmuoto
 
 `localStorage['kuntokayra_v1']` sisältää yhden JSON-olion, jossa on taulukot `workouts`, `sleep` ja `weight` sekä mahdolliset valinnaiset `workoutPending`-, `sleepPending`- ja `settings`-oliot. Avaimen nimi säilyy myös uusissa ominaisuuksissa. `loadState()` lukee olemassa olevan olion sellaisenaan; päivitys ei tarvitse migraatiota eikä käynnistyksessä tehdä tallennuskirjoitusta.
+
+Google-tilin päiväkirja käyttää samaa muotoa tilikohtaisessa avaimessa. Kopiointi aiemmasta päiväkirjasta tapahtuu käyttäjän valinnalla. Kun synkronointi on käytössä, valmiiden merkintöjen muutokset tallentuvat tilin D1-historiaan. Selaimen omat asetukset, luonnokset ja Garmin-yhteys pidetään paikallisina.
 
 Seuraava esimerkki on synteettinen. Valinnaisia kenttiä ei välttämättä ole vanhoissa kirjauksissa:
 

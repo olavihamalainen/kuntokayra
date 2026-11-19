@@ -13,6 +13,7 @@ Tässä varastossa ovat koko sovelluksen lähdekoodi, kehitysohjeet ja automaatt
 - [AGENTS.md](AGENTS.md): tärkeimmät säännöt muutosten tekemiseen ja tietojen säilyttämiseen.
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): tallennusmuoto, aiemmat toteutuspäätökset, toimintavaatimukset ja julkaisujen ero.
 - [docs/TESTING.md](docs/TESTING.md): ajettavat testit, niiden rajaukset ja manuaalinen selaintestaus.
+- [sync-worker/README.md](sync-worker/README.md) kuvaa Google-kirjautumisen, pilvisynkronoinnin käyttöönoton ja palautuksen.
 
 GitHub Pages ja alkuperäinen [ChatGPT Sites -sovellus](https://kuntokayra-olavi-20261116.festivecoyote3.chatgpt.site) ovat erillisiä julkaisuja. Tähän varastoon tehty muutos ei päivitä alkuperäistä osoitetta eikä siirrä selaimen merkintöjä osoitteiden välillä.
 
@@ -24,7 +25,7 @@ Testejä varten tarvitaan Node.js 22 tai uudempi; `.nvmrc` ja CI käyttävät No
 npm test
 ```
 
-Komento tarkistaa sovelluksen ja Garmin-palvelun JavaScriptin syntaksin ja ajaa 190 regressiotestiä. Testit käyttävät simuloitua selainympäristöä ja synteettistä dataa. GitHub Actions ajaa saman komennon automaattisesti. Pelkät syntaksitarkistukset voi ajaa komennolla `npm run check`.
+Komento tarkistaa sovelluksen ja Workerien JavaScriptin syntaksin ja ajaa 205 testiä. Testit käyttävät simuloitua selainympäristöä ja synteettistä dataa. GitHub Actions ajaa saman komennon automaattisesti. Pelkät syntaksitarkistukset voi ajaa komennolla `npm run check`.
 
 ## Käyttö
 
@@ -41,7 +42,9 @@ Komento tarkistaa sovelluksen ja Garmin-palvelun JavaScriptin syntaksin ja ajaa 
 
 ## Tietojen tallennus ja siirtäminen
 
-Treenit, yöajat ja painot, keskeneräinen treeni ja yö sekä ohjelma- ja taukoasetukset tallentuvat tämän laitteen selaimeen avaimella `kuntokayra_v1`. Tiedot eivät tallennu GitHubiin eivätkä synkronoidu laitteiden välillä. Tämä koodivarasto ei sisällä henkilökohtaisia päiväkirjamerkintöjä.
+Treenit, yöajat ja painot, keskeneräinen treeni ja yö sekä ohjelma- ja taukoasetukset tallentuvat selaimeen. Kirjautumatta käytössä on tuttu `kuntokayra_v1`-päiväkirja.
+
+Valitse **Asetukset → Pilvisynkronointi → Kirjaudu Googlella**. Kopioi halutessasi saman selaimen aiemmat merkinnät kirjautuneen tilin päiväkirjaan. Kun valitset **Ota synkronointi käyttöön**, tilin valmiit treenit, yöajat ja painot siirtyvät Cloudflare D1:een ja näkyvät muilla synkronointiin liitetyillä laitteilla. Kirjautuneen profiilin Garmin-yhteyden voi kopioida erikseen asetuksissa. [Pilvisynkronoinnin ohje](sync-worker/README.md)
 
 Saman GitHub Pages -osoitteen päivittäminen säilyttää tämän selaimen aiemmat merkinnät. Päivitys ei tarvitse tietojen tuontia tai tallennuksen uudelleenkirjoitusta. Vanhoja version 1 JSON-varmuuskopioita voi edelleen tuoda. Tuonti korvaa nykyiset tiedot vahvistuksen jälkeen; vie nykyiset tiedot talteen ennen tuontia, jos haluat säilyttää ne.
 
@@ -62,7 +65,7 @@ Treeniohjelman, keskeneräisen kirjauksen, kotikorttien ja näytön käännön p
 
 ## Julkaisu ja päivittäminen
 
-Sovellus koostuu kahdeksasta staattisesta sovellustiedostosta. Se ei tarvitse npm-asennusta tai build-komentoa. Valinnainen Garmin-yhteys käyttää erikseen julkaistavaa Cloudflare Workeria. Varaston `package.json` ja Node.js ovat vain kehitystarkistuksia varten.
+GitHub Pages tarjoaa staattiset sovellustiedostot suoraan. Valinnaisilla Garmin-yhteydellä ja pilvisynkronoinnilla on omat Cloudflare Workerinsa. Varaston `package.json` ja Node.js ovat kehitystarkistuksia varten.
 
 GitHub Pages julkaisee `main`-haaran juurikansion (`/`). Muutokset julkaistaan automaattisesti, kun ne tallennetaan `main`-haaraan. `.nojekyll` ohittaa Jekyll-käsittelyn.
 

@@ -1,0 +1,1 @@
+globalThis.KuntokayraBrowserConfig = Object.freeze({"workerOrigin":"https://kuntokayra-sync.olavi-hamalainen.workers.dev","storageKey":"kuntokayra_v1","garminStorageKey":"kuntokayra_garmin_connection_v1"});

@@ -1,0 +1,21 @@
+{
+  "name": "kuntokayra-sync",
+  "main": "sync-worker/worker.mjs",
+  "compatibility_date": "2026-11-19",
+  "workers_dev": true,
+  "preview_urls": false,
+  "keep_vars": true,
+  "vars": {
+    "APP_ORIGIN": "https://kuntokayra-sync.olavi-hamalainen.workers.dev",
+    "APP_FRONTEND_URL": "https://olavihamalainen.github.io/kuntokayra/",
+    "GOOGLE_CLIENT_ID": "LISAA_GOOGLE_OAUTH_CLIENT_ID"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "kuntokayra-sync",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "sync-worker/migrations"
+    }
+  ]
+}

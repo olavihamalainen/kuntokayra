@@ -10,7 +10,7 @@ Koodivaraston juuressa:
 npm test
 ```
 
-Komento tarkistaa sovelluksen ja Garmin-Workerin neljän JavaScript-tiedoston syntaksin ja ajaa **190 testiä** Node.js:n omalla testiajurilla. `tests/regression.test.mjs` tuo vanhojen testien lisäksi Garmin-, treeniohjelma-, seuraava treeni- ja editorin viimeistelytestit. Workerin 27 testiä ajetaan samassa npm-komennossa. Syntaksin voi tarkistaa erikseen komennolla `npm run check`.
+Komento tarkistaa sovelluksen ja Workerien JavaScriptin syntaksin ja ajaa **205 testiä** Node.js:n omalla testiajurilla. Mukana ovat treeni-, yöaika-, paino-, Garmin- ja pilvisynkronointitestit. Syntaksin voi tarkistaa erikseen komennolla `npm run check`.
 
 Testien tiedostopolut lasketaan moduulin sijainnista. Ne eivät edellytä alkuperäistä työtilaa tai tätä keskustelua. [GitHub Actions](../.github/workflows/tests.yml) ajaa saman `npm test` -komennon push- ja pull request -tapahtumissa.
 
@@ -40,8 +40,11 @@ Kevyet korvikkeet mallintavat DOM-elementtejä, localStoragea, tiedoston tuontia
 | Käyrien akselit | Kokonaiset kehonpainokilot, fyysiset kg/lbs-vaihteluvälit, kaksi ylimääräistä akseliväliä molemmin puolin ja nollaan rajaus |
 | Käyrien käyttö | Vain 30 pv -pistevalinta myös suurennettuna, muiden jaksojen valinnan esto, näppäimistö ja päällekkäiset osumakohdat |
 | Käyrien koko | Muuttuva viewBox 260–950 px leveyksillä, kaikkien pisteiden rajat, valinnan säilyminen ja rajattu rekisteri ilman tallennuskirjoituksia |
+| Google ja pilvisynkronointi | Täsmällinen CORS-alkuperä, kertakäyttöinen PKCE-koodi, tilien eristys, paikallinen kopiointi, uudelleenavaus, offline-muutokset, tuonti ja vienti |
 
 Testimäärä jakautuu aiempiin 81 sovellustestiin, Garmin-ytimen 18, Garmin-selainintegraation 16, Workerin 27, treeniohjelman 17, seuraavan treenin/luonnoksen/järjestelyn 19 ja editorin viimeistelyn 12 testiin. Viimeistely kattaa molemmat poistovahvistukset ja niiden peruuttamisen, poistojen tallennusvirheet, 30 päivän pikakäyrät sekä simuloidut pysty–vaaka–pysty-käännöt ja sulkemisen aktiivisen ajastimen kanssa. Testit eivät todista oikean puhelinselaimen asettelua tai kosketusosumia. Julkaisu ei sisällä esikatselun kuvitteellista varmuuskopiota tai sitä vaativia testejä.
+
+Pilvisynkronointi lisää 15 testiä tiedostoissa `tests/browser-auth.test.mjs` ja `tests/cloud-sync.test.mjs`. Worker-kutsut käyttävät synteettisiä Google-vastauksia ja muistissa toimivaa SQLitea. Oikean tuotantoyhteyden valmius ja kirjautuminen tarkistetaan käyttöönotossa. [Käyttöönotto-ohje](../sync-worker/README.md)
 
 ## Oikeassa selaimessa tehtävät tarkistukset
 
@@ -61,7 +64,7 @@ Avaa <http://127.0.0.1:4173/>. Localhost soveltuu service workerin kokeiluun; `f
 6. **Käyrien leveys:** tarkista 30 pv, 3 kk, 6 kk, 12 kk ja Kaikki sekä tavallisena että suurennettuna. Koko jakso mahtuu leveyteen ilman käyrän sisäistä sivuttaisvieritystä. Akselitekstit näkyvät, ja y-akselin lisävälit sekä nollaraja toimivat. Sivun tai dialogin tavallinen pystysuuntainen vieritys on sallittu.
 7. **Käyrien pisteet:** vain 30 pv -näkymässä pisteet ovat valittavia. Kokeile kosketusta, hiirtä, nuolia, Enteriä ja välilyöntiä; tarkista oikea päivä ja yksikkö. Yöajan piste näyttää kellonajat ja eron valitun jakson keskiarvosta. Muut aikavälit näyttävät yleiskäyrän. Leveyden muutos säilyttää valinnan.
 8. **Pysyvyys ja kopiot:** tallenna treeni, yö, paino ja taukoasetus; avaa sama osoite samalla selaimella tai PWA-kuvakkeella. Vie kopio ja tuo se erilliseen testiprofiiliin. Kokeile myös vanhaa kopiota, jossa valinnaiset kentät puuttuvat. Natiivin tiedostovalitsimen, peruutuksen ja virheellisen tiedoston toiminta pitää tarkistaa selaimessa.
-9. **PWA ja päivitys:** asenna aloitusnäytölle, kokeile offline-avausta ja uuden `CACHE`-version käyttöönottoa. Tallennetut merkinnät, keskeneräinen yö ja taukoasetus säilyvät. Ajastin ja keskeneräinen treeniluonnos ovat vain muistissa eivätkä palaudu täydestä uudelleenlatauksesta.
+9. **PWA ja päivitys:** asenna aloitusnäytölle, kokeile offline-avausta ja uuden `CACHE`-version käyttöönottoa. Tarkista tallennetut merkinnät, treeniluonnos, keskeneräinen yö ja taukoasetus. Käynnissä oleva ajastin on muistissa.
 
 ## Raportoinnin rajat
 
